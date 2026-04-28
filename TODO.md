@@ -6,8 +6,7 @@
 - Nginx-Configs im Webfrontend editieren.
 - `/opt/www` nach Nginx-Config-Dateien durchsuchen.
 - Gefundene Configs als aktivierbare Einträge anbieten.
-- Configs nach `/etc/nginx/sites-available` übernehmen.
-- Aktivierung über Symlink nach `/etc/nginx/sites-enabled`.
+- Aktivierung über Symlink aus dem Projektordner nach `/etc/nginx/sites-enabled`.
 - `nginx -t` ausführen und Ergebnis anzeigen.
 - Nginx reloaden, bevorzugt `systemctl reload nginx` statt Restart.
 - SSL-Zertifikate per Certbot ausstellen.
@@ -24,9 +23,11 @@
 
 ## Korrekturen und Grundsatzentscheidungen
 
-- Nicht primär "in `sites-available` linken": Üblicher Ablauf ist Datei in `sites-available`, aktiv durch Symlink in `sites-enabled`.
+- Projekt-Configs werden direkt aus `/opt/www` nach `/etc/nginx/sites-enabled` gesymlinkt.
+- `/etc/nginx/sites-available` ist nicht der primäre Speicherort fuer Projekt-Configs.
 - Reload statt Restart verwenden, solange möglich. Restart beendet aktive Verbindungen unnötig.
 - Keinen eigenen Certbot-Cronjob erzwingen. Certbot bringt je nach Installation bereits Cron oder systemd Timer mit.
+- Certbot darf im MVP die Nginx-Config mit dem Nginx-Plugin selbst ändern, aber nur mit Backup vorher und `nginx -t` danach.
 - Keine freie Shell aus dem Webfrontend anbieten.
 - SSH-Secret in der Web-App ist wahrscheinlich nicht sauber genug. Besser: Passkey/WebAuthn plus Zugriff nur über VPN, Tailscale oder localhost.
 - Nginx selbst nicht über PM2 betreiben. Nginx bleibt ein Systemdienst und wird über `systemctl reload nginx` gesteuert.
@@ -54,7 +55,7 @@
 - Frontend-Interaktion: HTMX.
 - Styling: Bulma.
 - Editor: zunächst normales `<textarea>`, später optional CodeMirror.
-- Betrieb der Verwaltungs-App: PM2 oder systemd, Entscheidung offen.
+- Betrieb der Verwaltungs-App: systemd.
 - Betrieb von Nginx: systemd.
 - Betrieb verwalteter Webapps: initial PM2.
 - Speicherung: SQLite für Audit-Log, bekannte Projekte, UI-State und Backup-Metadaten.
@@ -73,6 +74,16 @@
 - `config.mamasystems.de` kann auf einem separaten System laufen, bevor `mamasystems.de` und die gehosteten Anwendungen migriert werden.
 - Die Verwaltungs-App soll den schrittweisen Serverumzug unterstützen, nicht davon abhängen, dass alle Domains bereits umgezogen sind.
 - Das Tool ist fuer genau einen Nutzer ausgelegt.
+- Zielsystem: Ubuntu/Debian mit Standard-Nginx-Struktur.
+- Erwartete Nginx-Pfade:
+  - `/etc/nginx/sites-available`
+  - `/etc/nginx/sites-enabled`
+- Projektpfad ist fest: `/opt/www`.
+- Nginx-Config-Dateimuster in Projekten: `+.nginx`.
+- Datenablage: `/opt/nginx-config/`.
+- SQLite und Backups liegen unterhalb der Datenablage.
+- Certbot-Verhalten: bevorzugt `certbot --nginx`, weil es fuer den MVP einfacher ist.
+- Wenn Certbot zu unkontrollierbare Config-Aenderungen erzeugt, wechseln wir spaeter auf manuell verwaltete SSL-Bloecke.
 
 ## App-Prozessverwaltung
 
@@ -105,11 +116,8 @@
   - `pm2 save`
 - Kein freies Shell-Kommando im UI.
 - Projektordner müssen unter `/opt/www` liegen.
-- Startkommandos kommen aus Templates, z.B.:
-  - `uv run uvicorn app.main:app --host 127.0.0.1 --port {port}`
-  - `npm run start`
-  - `node server.js`
-  - `python main.py`
+- Startkommando-/PM2-Templates werden spaeter entschieden.
+- Bisher bringt jede App ihr eigenes Startscript mit.
 - Ports nur aus erlaubtem Bereich, z.B. `3000-9999`.
 - `reload` nur anbieten, wenn es für den Prozess sinnvoll ist. Sonst `restart` verwenden.
 
@@ -135,7 +143,7 @@
   - Tailscale/VPN als Alternative evaluieren.
   - nicht nur durch Passkey schuetzen, wenn die App im oeffentlichen Internet steht.
 - IP-Allowlist muss ausserhalb der Web-App einfach aktualisierbar sein, z.B. per SSH:
-  - Allowlist-Datei auf dem Server.
+  - Allowlist-Datei: `/etc/nginx/snippets/config-admin-allowlist.conf`.
   - Nginx-Include fuer erlaubte Admin-IPs.
   - Helper-Kommando zum Setzen der aktuellen IP.
   - Danach `nginx -t` und `systemctl reload nginx`.
@@ -155,7 +163,7 @@
 2. Configs anzeigen und editieren.
 3. Vor Config-Änderungen Backups erstellen.
 4. `nginx -t` ausführen und Ergebnis im UI anzeigen.
-5. Configs über Symlink aktivieren/deaktivieren.
+5. Configs per Symlink aus dem Projektordner nach `/etc/nginx/sites-enabled` aktivieren/deaktivieren.
 6. Nginx nach erfolgreichem Test reloaden.
 7. PM2-Prozesse anzeigen.
 8. PM2-Prozesse anlegen, restarten, stoppen und löschen.
@@ -167,13 +175,4 @@
 
 ## Offene Fragen
 
-- Soll `/opt/www` fest verdrahtet oder konfigurierbar sein?
-- Welche Dateinamen gelten als Nginx-Config: `*.conf`, `nginx.conf`, projektbezogene Dateien?
-- Soll das Tool Configs kopieren oder direkt Symlinks aus Projektordnern verwenden?
-- Welche Linux-Distribution und Nginx-Struktur ist Zielsystem?
-- Soll Certbot die Nginx-Config selbst ändern dürfen oder sollen wir Zertifikatspfade selbst eintragen?
-- Soll die App nur per IP-Allowlist erreichbar sein oder spaeter auf Tailscale/VPN wechseln?
-- Soll die Verwaltungs-App selbst über PM2 oder systemd laufen?
-- Welche PM2-Starttemplates brauchen wir zuerst?
-- Welcher Portbereich soll für verwaltete Apps erlaubt sein?
-- Wie soll die Allowlist-Datei konkret liegen, z.B. `/etc/nginx/snippets/config-admin-allowlist.conf`?
+- Welche PM2-/Startscript-Templates brauchen wir spaeter zuerst?
