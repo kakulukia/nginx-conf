@@ -4,7 +4,7 @@
 
 - [ ] Nginx-Configs anzeigen.
 - [ ] Nginx-Configs im Webfrontend editieren.
-- [ ] `/opt/www` nach Nginx-Config-Dateien durchsuchen.
+- [x] `/opt/www` nach Nginx-Config-Dateien durchsuchen.
 - [ ] Gefundene Configs als aktivierbare Einträge anbieten.
 - [ ] Aktivierung über Symlink aus dem Projektordner nach `/etc/nginx/sites-enabled`.
 - [ ] `nginx -t` ausführen und Ergebnis anzeigen.
@@ -144,7 +144,7 @@
 
 ## MVP-Reihenfolge
 
-- [ ] 1. Projekte und Configs unter `/opt/www` finden.
+- [x] 1. Projekte und Configs unter `/opt/www` finden.
 - [ ] 2. Configs anzeigen und editieren.
 - [ ] 3. Vor Config-Änderungen Backups erstellen.
 - [ ] 4. `nginx -t` ausführen und Ergebnis im UI anzeigen.
