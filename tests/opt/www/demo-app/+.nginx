@@ -1,0 +1,11 @@
+server {
+    listen 80;
+    server_name demo.local www.demo.local;
+
+    root /opt/www/demo-app/public;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}

@@ -8,6 +8,7 @@
 - Nutze Stichpunkte, wenn sie die Antwort klarer machen.
 - Widersprich aktiv, wenn Annahmen riskant, falsch oder unvollstaendig sind.
 - Stelle bei fachlichen Einwaenden Rueckfragen, bevor du riskante Aenderungen umsetzt.
+- Wenn eine vorgeschlagene Umsetzung funktioniert, aber eine naheliegende Standard- oder Best-Practice-Variante leicht besser ist, weise vor der Umsetzung darauf hin und frage nach, sofern nicht explizit direktes Umsetzen verlangt wurde.
 
 ## Projektkontext
 
