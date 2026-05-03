@@ -145,7 +145,8 @@
 ## MVP-Reihenfolge
 
 - [x] 1. Projekte und Configs unter `/opt/www` finden.
-- [ ] 2. Configs anzeigen und editieren.
+- [ ] 2a. Gefundene Configs read-only anzeigen.
+- [ ] 2b. Configs editieren und speichern.
 - [ ] 3. Vor Config-Änderungen Backups erstellen.
 - [ ] 4. `nginx -t` ausführen und Ergebnis im UI anzeigen.
 - [ ] 5. Configs per Symlink aus dem Projektordner nach `/etc/nginx/sites-enabled` aktivieren/deaktivieren.

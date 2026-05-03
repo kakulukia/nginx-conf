@@ -35,12 +35,51 @@
         font-size: 1rem;
         line-height: 1.5;
       }
+
+      ul {
+        padding-left: 1.25rem;
+      }
+
+      li + li {
+        margin-top: 0.5rem;
+      }
+
+      pre {
+        overflow: auto;
+        padding: 1rem;
+        background: #0f172a;
+        color: #e2e8f0;
+        border-radius: 0.5rem;
+      }
+
+      a {
+        color: #0f4c81;
+      }
     </style>
   </head>
   <body>
     <main>
       <h1>{{ title }}</h1>
-      <p>Hello World. Die Web-App läuft.</p>
+      {% if configs is defined %}
+        {% if configs %}
+          <ul>
+            {% for config in configs %}
+              <li>
+                <a href="/configs/{{ config.project_name }}/{{ config.config_path.name }}">
+                  {{ config.project_name }} / {{ config.config_path.name }}
+                </a>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p>Keine Configs gefunden.</p>
+        {% endif %}
+      {% elif config_content is defined %}
+        <p>{{ config.config_path }}</p>
+        <pre>{{ config_content }}</pre>
+      {% else %}
+        <p>Die Web-App läuft.</p>
+      {% endif %}
     </main>
   </body>
 </html>
