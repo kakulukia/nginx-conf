@@ -2,7 +2,7 @@
 name = "nginx-conf"
 version = "0.1.0"
 description = "Web tool for managing Nginx project configs"
-readme = "TODO.md"
+readme = "docs/technikreferenz.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.115.0",

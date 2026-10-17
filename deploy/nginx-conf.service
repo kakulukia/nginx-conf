@@ -1,0 +1,23 @@
+[Unit]
+Description=Nginx configuration admin app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nginx-config
+Group=nginx-config
+WorkingDirectory=/opt/nginx-conf
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/nginx-conf/.venv/bin/uvicorn nginx_conf.main:app --host 127.0.0.1 --port 8080 --proxy-headers
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/www /etc/nginx /etc/letsencrypt
+ReadWritePaths=/opt/nginx-config
+
+[Install]
+WantedBy=multi-user.target

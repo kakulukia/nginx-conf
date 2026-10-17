@@ -1,8 +1,13 @@
 from pathlib import Path
 
-from nginx_conf.configs import find_project_configs
+from nginx_conf.configs import discover_inventory, find_project_configs, parse_server_blocks
 
 ROOT = Path(__file__).parent
+ENABLED_ROOT = ROOT / "etc/nginx/sites-enabled"
+
+
+def issue_codes(issues) -> set[str]:
+    return {issue.code for issue in issues}
 
 
 def test_find_project_configs_finds_demo_app_config() -> None:
@@ -40,3 +45,135 @@ def test_find_project_configs_does_not_follow_symlink_dirs(tmp_path: Path) -> No
 
     assert [config.config_path for config in configs] == [project_config]
     assert outside_config not in [config.config_path for config in configs]
+
+
+def test_discover_inventory_keeps_server_name_groups_and_enabled_status() -> None:
+    inventory = discover_inventory(ROOT / "opt/www", ENABLED_ROOT)
+
+    assert "project_symlink_skipped" in issue_codes(inventory.issues)
+    assert [project.project_name for project in inventory.projects] == ["demo-app"]
+
+    project = inventory.projects[0]
+    assert project.domains == ("demo.local", "www.demo.local")
+    assert not project.issues
+
+    config = project.configs[0]
+    assert config.enabled is True
+    assert config.enabled_symlinks[0].link_path.relative_to(ROOT) == Path("etc/nginx/sites-enabled/demo-app.conf")
+
+    assert len(config.server_blocks) == 1
+    block = config.server_blocks[0]
+    assert block.server_names == ("demo.local", "www.demo.local")
+    assert block.listen_ports == (80,)
+    assert block.certbot_eligible is True
+
+
+def test_parse_server_blocks_preserves_multiple_server_blocks(tmp_path: Path) -> None:
+    config_path = tmp_path / "app.nginx"
+    config_path.write_text(
+        """
+        server {
+            listen 80;
+            server_name example.com www.example.com;
+            location / { try_files $uri $uri/ =404; }
+        }
+
+        server {
+            listen [::]:443 ssl;
+            server_name _;
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    blocks = parse_server_blocks(config_path)
+
+    assert [block.server_names for block in blocks] == [
+        ("example.com", "www.example.com"),
+        ("_",),
+    ]
+    assert [block.listen_ports for block in blocks] == [(80,), (443,)]
+    assert blocks[0].certbot_eligible is True
+    assert blocks[1].certbot_eligible is False
+    assert blocks[1].certbot_blockers == ("not_public_domain:_",)
+
+
+def test_discover_inventory_marks_projects_without_nginx_config_incomplete(tmp_path: Path) -> None:
+    root = tmp_path / "opt/www"
+    enabled_root = tmp_path / "etc/nginx/sites-enabled"
+    project_dir = root / "legacy-app"
+    project_dir.mkdir(parents=True)
+    enabled_root.mkdir(parents=True)
+    (project_dir / "nginx.conf").write_text("server { server_name ignored.example.com; }", encoding="utf-8")
+    (project_dir / "app.nginx-plesk-config").write_text("server { server_name ignored.example.com; }", encoding="utf-8")
+
+    inventory = discover_inventory(root, enabled_root)
+
+    assert len(inventory.projects) == 1
+    assert inventory.projects[0].configs == ()
+    assert "missing_nginx_config" in issue_codes(inventory.projects[0].issues)
+
+
+def test_discover_inventory_reports_missing_project_root(tmp_path: Path) -> None:
+    inventory = discover_inventory(tmp_path / "missing", tmp_path / "sites-enabled")
+
+    assert inventory.projects == ()
+    assert issue_codes(inventory.issues) == {"project_root_missing"}
+
+
+def test_discover_inventory_rejects_config_symlinks_and_foreign_enabled_symlinks(tmp_path: Path) -> None:
+    root = tmp_path / "opt/www"
+    enabled_root = tmp_path / "etc/nginx/sites-enabled"
+    project_dir = root / "demo-app"
+    project_dir.mkdir(parents=True)
+    enabled_root.mkdir(parents=True)
+
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    outside_config = outside_dir / "escape.nginx"
+    outside_config.write_text("server { listen 80; server_name escape.example.com; }", encoding="utf-8")
+
+    (project_dir / "linked.nginx").symlink_to(outside_config)
+    (enabled_root / "escape.conf").symlink_to(outside_config)
+
+    inventory = discover_inventory(root, enabled_root)
+
+    assert "foreign_enabled_symlink" in issue_codes(inventory.issues)
+    assert "config_symlink_skipped" in issue_codes(inventory.projects[0].issues)
+    assert "missing_nginx_config" in issue_codes(inventory.projects[0].issues)
+    assert inventory.projects[0].configs == ()
+
+
+def test_discover_inventory_reports_broken_enabled_symlink(tmp_path: Path) -> None:
+    root = tmp_path / "opt/www"
+    enabled_root = tmp_path / "etc/nginx/sites-enabled"
+    project_dir = root / "demo-app"
+    project_dir.mkdir(parents=True)
+    enabled_root.mkdir(parents=True)
+    (project_dir / "app.nginx").write_text("server { listen 80; server_name demo.example.com; }", encoding="utf-8")
+    (enabled_root / "broken.conf").symlink_to(tmp_path / "missing.nginx")
+
+    inventory = discover_inventory(root, enabled_root)
+
+    assert "broken_enabled_symlink" in issue_codes(inventory.issues)
+    assert inventory.projects[0].configs[0].enabled is False
+
+
+def test_discover_inventory_reports_duplicate_domains_and_ports(tmp_path: Path) -> None:
+    root = tmp_path / "opt/www"
+    enabled_root = tmp_path / "etc/nginx/sites-enabled"
+    enabled_root.mkdir(parents=True)
+
+    first_project = root / "first"
+    second_project = root / "second"
+    first_project.mkdir(parents=True)
+    second_project.mkdir()
+    (first_project / "app.nginx").write_text("server { listen 8080; server_name clash.example.com; }", encoding="utf-8")
+    (second_project / "app.nginx").write_text("server { listen 8080; server_name clash.example.com; }", encoding="utf-8")
+
+    inventory = discover_inventory(root, enabled_root)
+
+    assert "duplicate_domain" in issue_codes(inventory.projects[0].issues)
+    assert "duplicate_listen_port" in issue_codes(inventory.projects[0].issues)
+    assert "duplicate_domain" in issue_codes(inventory.projects[1].issues)
+    assert "duplicate_listen_port" in issue_codes(inventory.projects[1].issues)

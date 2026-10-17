@@ -9,3 +9,6 @@ __pycache__/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# bv (beads viewer) local config and caches
+.bv/

@@ -1,0 +1,237 @@
+{
+  "communities": {
+    "0": [
+      "nginx_conf_configs_nginxconfig",
+      "nginx_conf_main",
+      "nginx_conf_main_config_detail",
+      "nginx_conf_main_configs_index",
+      "nginx_conf_main_find_config_or_404",
+      "nginx_conf_main_health",
+      "nginx_conf_main_home",
+      "nginx_conf_main_load_configs",
+      "nginxconfig",
+      "request",
+      "response",
+      "src_nginx_conf_main_py_path",
+      "str"
+    ],
+    "1": [
+      "nginx_conf_configs",
+      "nginx_conf_configs_find_project_configs",
+      "src_nginx_conf_configs_py_path",
+      "tests_test_configs",
+      "tests_test_configs_py_path",
+      "tests_test_configs_test_find_project_configs_does_not_follow_symlink_dirs",
+      "tests_test_configs_test_find_project_configs_finds_demo_app_config",
+      "tests_test_configs_test_find_project_configs_ignores_non_config_files"
+    ],
+    "2": [
+      "agents_project_context",
+      "nginx_conf_home_template",
+      "todo_app_process_management",
+      "todo_auth_and_initial_setup",
+      "todo_corrections_and_decisions",
+      "todo_mvp_order",
+      "todo_nginx_management_tool"
+    ],
+    "3": [
+      "beads_metadata",
+      "beads_metadata_backend",
+      "beads_metadata_database",
+      "beads_metadata_dolt_database",
+      "beads_metadata_dolt_mode",
+      "beads_metadata_project_id"
+    ],
+    "4": [
+      "codex_hooks",
+      "codex_hooks_hooks",
+      "codex_hooks_hooks_postcompact",
+      "codex_hooks_hooks_precompact",
+      "codex_hooks_hooks_sessionstart",
+      "codex_hooks_hooks_userpromptsubmit"
+    ],
+    "5": [
+      "tests_test_app",
+      "tests_test_app_test_config_detail_rejects_free_path",
+      "tests_test_app_test_config_detail_shows_config_content",
+      "tests_test_app_test_configs_index_shows_demo_config",
+      "tests_test_app_test_health",
+      "tests_test_app_test_home_page"
+    ],
+    "6": [
+      "claude_settings",
+      "claude_settings_hooks",
+      "claude_settings_hooks_sessionstart"
+    ],
+    "7": [
+      "beads_skill",
+      "claude_project_instructions"
+    ],
+    "8": [
+      "nginx_conf_init",
+      "nginx_conf_init_rationale_1"
+    ],
+    "9": [
+      "pre_commit_config",
+      "todo_quality_assurance"
+    ],
+    "10": [
+      "tests_test_local_fixture_tree",
+      "tests_test_local_fixture_tree_test_local_nginx_fixture_tree_exists"
+    ],
+    "11": [
+      "agents_communication"
+    ],
+    "12": [
+      "agents_workflow"
+    ],
+    "13": [
+      "beads_config"
+    ],
+    "14": [
+      "beads_openai_agent"
+    ],
+    "15": [
+      "beads_readme"
+    ],
+    "16": [
+      "todo_feature_list"
+    ],
+    "17": [
+      "todo_open_questions"
+    ]
+  },
+  "cohesion": {
+    "0": 0.358974358974359,
+    "1": 0.39285714285714285,
+    "2": 0.2857142857142857,
+    "3": 0.3333333333333333,
+    "4": 0.3333333333333333,
+    "5": 0.3333333333333333,
+    "6": 0.6666666666666666,
+    "7": 1.0,
+    "8": 1.0,
+    "9": 1.0,
+    "10": 1.0,
+    "11": 1.0,
+    "12": 1.0,
+    "13": 1.0,
+    "14": 1.0,
+    "15": 1.0,
+    "16": 1.0,
+    "17": 1.0
+  },
+  "gods": [
+    {
+      "id": "nginx_conf_configs_nginxconfig",
+      "label": "NginxConfig",
+      "degree": 7
+    },
+    {
+      "id": "nginx_conf_configs_find_project_configs",
+      "label": "find_project_configs()",
+      "degree": 7
+    },
+    {
+      "id": "nginx_conf_main_load_configs",
+      "label": "load_configs()",
+      "degree": 7
+    },
+    {
+      "id": "nginx_conf_main_find_config_or_404",
+      "label": "find_config_or_404()",
+      "degree": 6
+    },
+    {
+      "id": "todo_nginx_management_tool",
+      "label": "Nginx-Verwaltungstool TODO",
+      "degree": 6
+    },
+    {
+      "id": "codex_hooks_hooks",
+      "label": "hooks",
+      "degree": 5
+    },
+    {
+      "id": "nginx_conf_main_config_detail",
+      "label": "config_detail()",
+      "degree": 5
+    },
+    {
+      "id": "str",
+      "label": "str",
+      "degree": 4
+    },
+    {
+      "id": "nginx_conf_main_home",
+      "label": "home()",
+      "degree": 4
+    },
+    {
+      "id": "request",
+      "label": "Request",
+      "degree": 4
+    }
+  ],
+  "surprises": [
+    {
+      "source": "Home HTML Template",
+      "target": "Nginx-Verwaltungstool TODO",
+      "source_files": [
+        "src/nginx_conf/templates/home.html",
+        "TODO.md"
+      ],
+      "confidence": "INFERRED",
+      "relation": "conceptually_related_to",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; peripheral node `Home HTML Template` unexpectedly reaches hub `Nginx-Verwaltungstool TODO`"
+    },
+    {
+      "source": "test_find_project_configs_ignores_non_config_files()",
+      "target": "find_project_configs()",
+      "source_files": [
+        "tests/test_configs.py",
+        "src/nginx_conf/configs.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "connects across different repos/directories; peripheral node `test_find_project_configs_ignores_non_config_files()` unexpectedly reaches hub `find_project_configs()`"
+    },
+    {
+      "source": "Projektkontext",
+      "target": "Nginx-Verwaltungstool TODO",
+      "source_files": [
+        "AGENTS.md",
+        "TODO.md"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "references",
+      "why": "connects across different repos/directories; peripheral node `Projektkontext` unexpectedly reaches hub `Nginx-Verwaltungstool TODO`"
+    },
+    {
+      "source": "test_find_project_configs_does_not_follow_symlink_dirs()",
+      "target": "find_project_configs()",
+      "source_files": [
+        "tests/test_configs.py",
+        "src/nginx_conf/configs.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "connects across different repos/directories"
+    },
+    {
+      "source": "test_find_project_configs_finds_demo_app_config()",
+      "target": "find_project_configs()",
+      "source_files": [
+        "tests/test_configs.py",
+        "src/nginx_conf/configs.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "connects across different repos/directories"
+    }
+  ],
+  "tokens": {
+    "input": 7392,
+    "output": 1384
+  }
+}
