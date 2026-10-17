@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from xml.etree import ElementTree
 
 from fastapi.testclient import TestClient
 
@@ -26,7 +27,7 @@ def test_styleguide_requires_session_and_renders_dark_desktop_examples(monkeypat
     assert "Gravity" not in browser.get("/static/styleguide.css").text
 
 
-def test_styleguide_only_exposes_css_and_fonts_without_a_session(monkeypatch, tmp_path: Path) -> None:
+def test_styleguide_only_exposes_css_fonts_and_favicon_without_a_session(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "styleguide.sqlite3")
     browser = TestClient(main.app, follow_redirects=False)
     css = browser.get("/static/styleguide.css")
@@ -36,5 +37,9 @@ def test_styleguide_only_exposes_css_and_fonts_without_a_session(monkeypatch, tm
         font = browser.get(f"/static/fonts/source-code-pro-{weight}.woff2")
         assert font.status_code == 200
         assert font.content.startswith(b"wOF2")
+    favicon = browser.get("/static/favicon.svg")
+    assert favicon.status_code == 200
+    assert favicon.headers["content-type"].startswith("image/svg+xml")
+    assert ElementTree.fromstring(favicon.content).tag == "{http://www.w3.org/2000/svg}svg"
     assert browser.get("/static/_tokens.sass").status_code == 303
     assert browser.get("/static/fonts/OFL.txt").status_code == 303

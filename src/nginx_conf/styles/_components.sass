@@ -18,17 +18,27 @@
   box-sizing: border-box
   border-radius: 0
 
+html, .nc-scroll, .nc-textarea, .nc-suggestions, .nc-code, .nc-dialog
+  &::-webkit-scrollbar
+    width: 8px
+    height: 8px
+  &::-webkit-scrollbar-thumb
+    background: var(--nc-fg2)
+    border-radius: 0
+  &::-webkit-scrollbar-corner
+    background: var(--nc-bg)
+
 body
   margin: 0
 button, input, select, textarea
   font: inherit
 button, input, select, textarea, a, summary
   &:focus-visible
-    outline: 2px solid var(--nc-accent)
+    outline: 1px solid var(--nc-focus)
     outline-offset: 4px
 button:not(:disabled), summary
   cursor: pointer
-button:disabled, input:disabled
+button:disabled, input:disabled, select:disabled, textarea:disabled
   cursor: not-allowed
 
 .nc-page
@@ -54,10 +64,21 @@ button:disabled, input:disabled
   display: block
   color: var(--nc-fg2)
 a
-  color: var(--nc-accent)
+  color: var(--nc-warning)
+  text-decoration: none
   text-underline-offset: 4px
   &:hover
-    color: var(--nc-fg)
+    text-decoration: underline
+
+.nc-icon-link
+  display: inline-flex
+  align-items: center
+  justify-content: center
+  width: 32px
+  height: 32px
+  svg
+    width: 18px
+    height: 18px
 
 .nc-form
   display: flex
@@ -74,9 +95,11 @@ a
   background: transparent
   color: var(--nc-fg)
   font-size: 15px
-  &:hover:not(:disabled)
-    border-color: var(--nc-fg2)
-  &:focus
+  transition: padding-inline 180ms ease, background-color 180ms ease, border-color 180ms ease
+  &:is(:focus, :open)
+    outline: none
+    padding-inline: 12px
+    background: var(--nc-focus-fill)
     border-color: var(--nc-accent)
   &::placeholder
     color: var(--nc-fg2)
@@ -86,6 +109,63 @@ a
     color: var(--nc-fg2)
     border-color: var(--nc-line)
     border-bottom-style: dashed
+select.nc-input, ::picker(select)
+  appearance: base-select
+select.nc-input
+  &:has(> option[value=""]:checked), &:disabled, option[value=""]
+    color: var(--nc-placeholder)
+  &:not(:disabled)
+    cursor: pointer
+  option
+    background: var(--nc-bg)
+    color: var(--nc-fg)
+    padding: 8px 12px
+    &:checked, &:hover, &:focus-visible
+      background: var(--nc-focus-fill)
+    &:focus-visible
+      outline: none
+      color: var(--nc-accent)
+  &::picker-icon
+    color: var(--nc-accent)
+  &:disabled::picker-icon
+    color: var(--nc-placeholder)
+::picker(select)
+  position-area: block-end span-inline-end
+  position-try-order: normal
+  position-try-fallbacks: flip-block
+  padding: 0
+  border: 1px solid var(--nc-line)
+  background: var(--nc-bg)
+  color: var(--nc-fg)
+  font: inherit
+.nc-autocomplete
+  position: relative
+.nc-suggestions
+  position: absolute
+  z-index: 1
+  top: 100%
+  left: 0
+  width: 100%
+  max-height: 192px
+  overflow: auto
+  margin: 0
+  padding: 0
+  border: 1px solid var(--nc-line)
+  background: var(--nc-bg)
+  list-style: none
+  [role="option"], .nc-suggestions__empty
+    padding: 8px 12px
+  [role="option"]:not([aria-disabled="true"])
+    cursor: pointer
+    &:hover, &[aria-selected="true"]
+      background: var(--nc-focus-fill)
+      color: var(--nc-accent)
+.nc-suggestions__empty
+  color: var(--nc-fg2)
+  font-size: 10px
+.nc-textarea
+  min-height: 120px
+  resize: vertical
 .nc-error
   margin: 0
   color: var(--nc-error-text)
@@ -97,32 +177,29 @@ a
   justify-content: center
   min-height: 40px
   padding: 8px 16px
-  border: 1px solid var(--nc-accent)
-  background: var(--nc-accent)
-  color: var(--nc-bg)
+  border: 1px solid transparent
+  background: transparent
+  color: var(--nc-accent)
   font-weight: 700
   &:hover:not(:disabled)
-    background: var(--nc-fg)
-    border-color: var(--nc-fg)
+    background: var(--nc-focus-fill)
+    color: var(--nc-fg)
   &:disabled
-    background: transparent
+    background: color-mix(in srgb, var(--nc-fg2) 4%, var(--nc-bg))
     color: var(--nc-fg2)
-    border-color: var(--nc-line)
-    border-style: dashed
+    font-weight: 400
+.nc-button--save
+  color: var(--nc-success)
+  &:hover:not(:disabled)
+    background: color-mix(in srgb, var(--nc-success) 10%, var(--nc-bg))
+    color: var(--nc-success)
 .nc-button--quiet
-  background: transparent
   color: var(--nc-fg)
-  border-color: var(--nc-fg2)
-  &:hover:not(:disabled)
-    color: var(--nc-bg)
 .nc-button--danger
-  background: transparent
-  color: var(--nc-fg)
-  border-color: var(--nc-error)
+  color: var(--nc-error-text)
   &:hover:not(:disabled)
-    background: var(--nc-error)
-    border-color: var(--nc-error)
-    color: var(--nc-bg)
+    background: color-mix(in srgb, var(--nc-error) 10%, var(--nc-bg))
+    color: var(--nc-error-text)
 
 .nc-hint
   margin: 0
@@ -168,10 +245,46 @@ a
 .nc-disclosure
   padding: 12px 0
   border-bottom: 1px solid var(--nc-line)
-  summary
+  > summary
+    display: flex
+    align-items: center
+    gap: 8px
+    list-style: none
     color: var(--nc-accent)
-  p
-    margin-top: 12px
+    &::-webkit-details-marker
+      display: none
+    &::before
+      content: ""
+      flex-shrink: 0
+      width: .65em
+      height: .65em
+      background: currentColor
+      clip-path: polygon(0 0, 100% 50%, 0 100%)
+      transform: rotate(0deg)
+      transition: transform 180ms ease
+  &[open] > summary::before
+    transform: rotate(90deg)
+.nc-disclosure__body
+  padding-top: 12px
+
+@supports (interpolate-size: allow-keywords) and selector(::details-content)
+  .nc-disclosure::details-content
+    interpolate-size: allow-keywords
+    block-size: 0
+    opacity: 0
+    overflow: clip
+    transition: block-size 180ms ease, opacity 180ms ease, content-visibility 180ms allow-discrete
+  .nc-disclosure[open]::details-content
+    block-size: auto
+    opacity: 1
+@media (prefers-reduced-motion: reduce)
+  .nc-input
+    transition: none
+  .nc-disclosure > summary::before
+    transition: none
+  .nc-disclosure::details-content
+    transition: none
+
 .nc-code
   margin: 0
   padding: 16px
@@ -186,22 +299,13 @@ code
   overflow: auto
   border: 1px solid var(--nc-line)
   &:focus-visible
-    outline: 2px solid var(--nc-accent)
+    outline: 1px solid var(--nc-focus)
     outline-offset: 4px
   > .nc-code
     width: max-content
     min-width: 100%
     border: 0
     overflow: visible
-  &::-webkit-scrollbar
-    width: 8px
-    height: 8px
-  &::-webkit-scrollbar-thumb
-    background: var(--nc-fg2)
-    border-radius: 0
-  &::-webkit-scrollbar-corner
-    background: var(--nc-bg)
-
 .nc-choices
   display: flex
   gap: 0
@@ -225,7 +329,7 @@ code
     color: var(--nc-accent)
     border-color: var(--nc-accent)
   input:focus-visible + span
-    outline: 2px solid var(--nc-accent)
+    outline: 1px solid var(--nc-focus)
     outline-offset: 4px
 .nc-checkbox
   appearance: none
@@ -254,18 +358,119 @@ code
 .nc-table
   width: 100%
   border-collapse: collapse
-  font-size: 10px
+  font-size: inherit
   th, td
     padding: 12px 16px
     text-align: left
     white-space: nowrap
     border-bottom: 1px solid var(--nc-line)
   th
-    font-weight: 400
-    color: var(--nc-fg2)
+    font-weight: 700
+    color: var(--nc-fg)
   th:first-child, td:first-child
     padding-left: 0
   th:last-child, td:last-child
     padding-right: 0
   .nc-table__num
     text-align: right
+
+.nc-nav, .nc-breadcrumbs
+  display: flex
+  align-items: center
+  flex-wrap: wrap
+  gap: 24px
+.nc-nav
+  border-bottom: 1px solid var(--nc-line)
+  a
+    padding: 12px 0
+    border-bottom: 2px solid transparent
+    color: var(--nc-fg2)
+    text-decoration: none
+    &[aria-current="page"]
+      color: var(--nc-accent)
+      border-color: currentColor
+    &:hover
+      color: var(--nc-fg)
+.nc-breadcrumbs
+  gap: 12px
+  overflow-wrap: anywhere
+
+.nc-banner
+  --nc-banner-color: var(--nc-accent)
+  position: relative
+  padding: 12px 16px
+  border-left: 2px solid var(--nc-banner-color)
+  &:has(> .nc-banner__ack):hover
+    background: var(--nc-focus-fill)
+  > .nc-disclosure
+    position: relative
+    z-index: 1
+.nc-banner__title
+  display: block
+  color: var(--nc-banner-color)
+.nc-banner--success
+  --nc-banner-color: var(--nc-success)
+.nc-banner--error
+  --nc-banner-color: var(--nc-error-text)
+  .nc-text
+    color: var(--nc-error-text)
+.nc-banner__ack
+  position: absolute
+  inset: 0
+  width: 100%
+  height: 100%
+  padding: 0
+  border: 0
+  background: transparent
+.nc-banner__content
+  position: relative
+  pointer-events: none
+
+.nc-diff__header
+  color: var(--nc-fg2)
+.nc-diff__removed
+  color: var(--nc-error-text)
+.nc-diff__added
+  color: var(--nc-success)
+
+.nc-empty
+  display: grid
+  grid-template-rows: auto 1fr auto
+  gap: 16px
+  padding: 24px 0
+  border-block: 1px solid var(--nc-line)
+
+a.nc-button
+  text-decoration: none
+.nc-copy-row
+  > span
+    min-width: 0
+    overflow-wrap: anywhere
+  > button
+    flex-shrink: 0
+
+.nc-dialog
+  width: 640px
+  max-width: calc(100vw - 64px)
+  max-height: calc(100dvh - 64px)
+  overflow: auto
+  padding: 32px
+  border: 1px solid var(--nc-line)
+  background: var(--nc-bg)
+  color: var(--nc-fg)
+  font: inherit
+  box-shadow: none
+  &::backdrop
+    background: rgb(0 0 0 / .55)
+  > * + *
+    margin-top: 24px
+.nc-dialog__file
+  overflow-wrap: anywhere
+.nc-dialog__actions
+  display: flex
+  justify-content: flex-end
+  align-items: center
+  gap: 12px
+
+.nc-feedback:empty
+  display: none

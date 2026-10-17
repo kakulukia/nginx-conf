@@ -1,5 +1,6 @@
 // Palette from the installed Ghostty Default Style Dark theme.
 // Keep every component on these shared roles.
+@use "sass:color"
 $font: "Source Code Pro", monospace
 $background: #282c34
 $foreground: #ffffff
@@ -17,8 +18,11 @@ $violet: #b294bb
   --nc-bg: #{$background}
   --nc-fg: #{$foreground}
   --nc-fg2: #{$muted}
+  --nc-placeholder: #{color.mix($muted, $background, 60%)}
   --nc-line: #{$line}
   --nc-accent: #{$blue}
+  --nc-focus: #{color.mix($blue, $background, 67%)}
+  --nc-focus-fill: #{color.mix($blue, $background, 8%)}
   --nc-success: #{$green}
   --nc-warning: #{$yellow}
   --nc-error: #{$red}

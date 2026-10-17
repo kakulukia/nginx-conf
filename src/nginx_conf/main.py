@@ -89,6 +89,7 @@ PUBLIC_PATHS = {
     "/setup",
     "/api/setup",
     "/static/styleguide.css",
+    "/static/favicon.svg",
     "/static/fonts/source-code-pro-regular.woff2",
     "/static/fonts/source-code-pro-bold.woff2",
 }

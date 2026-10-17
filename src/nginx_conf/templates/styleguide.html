@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/svg+xml" sizes="any" href="{{ url_for('static', path='favicon.svg') }}">
     <title>Styleguide · nginx-conf</title>
     <link rel="stylesheet" href="{{ url_for('static', path='styleguide.css') }}">
   </head>
@@ -36,14 +37,14 @@
         <div class="nc-list">
           <div class="nc-row"><span class="nc-display">Seitentitel</span><span class="nc-row__sub">28 px / 700</span></div>
           <div class="nc-row"><span class="nc-heading">Abschnitt</span><span class="nc-row__sub">18 px / 700</span></div>
-          <div class="nc-row"><span>Lesetext, Eingaben und Aktionen</span><span class="nc-row__sub">15 px / 400</span></div>
-          <div class="nc-row"><span class="nc-row__sub">Nebenzeilen, Beschriftungen und Tabellen</span><span class="nc-row__sub">10 px / 400</span></div>
+          <div class="nc-row"><span>Lesetext, Eingaben, Aktionen und Tabellen</span><span class="nc-row__sub">15 px / 400</span></div>
+          <div class="nc-row"><span class="nc-row__sub">Nebenzeilen und Beschriftungen</span><span class="nc-row__sub">10 px / 400</span></div>
         </div>
       </section>
 
       <section class="sg-section" id="formulare">
         <h2 class="nc-heading">Eingabefelder</h2>
-        <p class="nc-text">Unterlinie, sichtbare Beschriftung und Fehler direkt am Feld.</p>
+        <p class="nc-text">Unterlinie und dezente Fläche im Fokus. Beschriftungen bleiben sichtbar, Fehler stehen direkt am Feld.</p>
         <div class="nc-form sg-form">
           <label class="nc-label" for="project">Projektname</label>
           <input class="nc-input" id="project" value="vorspiel-abrechnung">
@@ -54,15 +55,76 @@
           <p class="nc-error" id="error">Bitte einen Domainnamen ohne Protokoll eingeben.</p>
           <label class="nc-label" for="disabled">Nicht verfügbar</label>
           <input class="nc-input" id="disabled" value="Aktion läuft" disabled>
+          <label class="nc-label" for="config-example">Nginx-Konfiguration, Beispiel</label>
+          <textarea class="nc-input nc-textarea" id="config-example" rows="5" spellcheck="false" aria-describedby="config-example-hint">server {
+    server_name va.pepperz.de;
+    listen 80;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+    }
+}</textarea>
+          <p class="nc-text nc-text--small" id="config-example-hint">Bearbeitbares Beispiel ohne Speichern und ohne Serveraktion.</p>
+        </div>
+      </section>
+
+      <section class="sg-section" id="auswahlfelder">
+        <h2 class="nc-heading">Dropdown und Autocomplete</h2>
+        <p class="nc-text">Auswahl und Vorschläge sind per Maus und Tastatur bedienbar. Alle Beispiele bleiben ohne Serveraktion.</p>
+        <div class="sg-pair">
+          <div class="sg-specimen">
+            <h3 class="nc-heading">Dropdown</h3>
+            <div class="nc-form">
+              <label class="nc-label" for="runtime-empty">Laufzeit, leer</label>
+              <select class="nc-input" id="runtime-empty">
+                <option value="" selected>Bitte auswählen</option>
+                <option>Python</option>
+                <option>Node.js</option>
+                <option>Statische Dateien</option>
+              </select>
+              <label class="nc-label" for="runtime-selected">Laufzeit, ausgewählt</label>
+              <select class="nc-input" id="runtime-selected">
+                <option selected>Python</option>
+                <option>Node.js</option>
+                <option>Statische Dateien</option>
+              </select>
+              <label class="nc-label" for="runtime-disabled">Laufzeit, nicht verfügbar</label>
+              <select class="nc-input" id="runtime-disabled" disabled><option>Python</option></select>
+            </div>
+          </div>
+          <div class="sg-specimen">
+            <h3 class="nc-heading">Autocomplete</h3>
+            <div class="nc-form">
+              <label class="nc-label" for="project-search">Projekt suchen</label>
+              <div class="nc-autocomplete">
+                <input class="nc-input" id="project-search" list="project-suggestions" placeholder="Projektname eingeben" autocomplete="off" aria-describedby="project-search-hint">
+                <ul class="nc-suggestions" id="project-search-options" role="listbox" aria-label="Projektvorschläge" hidden></ul>
+              </div>
+              <label class="nc-label" for="project-selected">Projekt, ausgewählt</label>
+              <div class="nc-autocomplete">
+                <input class="nc-input" id="project-selected" list="project-suggestions" value="vorspiel-abrechnung" autocomplete="off">
+                <ul class="nc-suggestions" id="project-selected-options" role="listbox" aria-label="Projektvorschläge, ausgewähltes Projekt" hidden></ul>
+              </div>
+              <label class="nc-label" for="project-search-disabled">Projekt, nicht verfügbar</label>
+              <input class="nc-input" id="project-search-disabled" list="project-suggestions" value="nginx-conf" disabled>
+              <datalist id="project-suggestions">
+                <option value="vorspiel-abrechnung"></option>
+                <option value="nginx-conf"></option>
+                <option value="projektarchiv"></option>
+                <option value="statusseite"></option>
+              </datalist>
+            </div>
+            <p class="nc-text nc-text--small" id="project-search-hint">Tippen filtert die Vorschläge. Enter übernimmt den markierten Treffer. Freie Eingaben sind möglich.</p>
+          </div>
         </div>
       </section>
 
       <section class="sg-section" id="aktionen">
         <h2 class="nc-heading">Aktionen</h2>
-        <p class="nc-text">Eckig, ohne Schatten. Die Hauptaktion steht rechts. Alle Beispiele bleiben ohne Serveraktion.</p>
+        <p class="nc-text">Rahmenlose Aktionen mit dezenter Fläche bei Hover. Die Hauptaktion steht rechts. Alle Beispiele bleiben ohne Serveraktion.</p>
         <div class="sg-actions">
           <button class="nc-button nc-button--quiet" type="button">Abbrechen</button>
-          <button class="nc-button" type="button">Speichern</button>
+          <button class="nc-button nc-button--save" type="button">Speichern</button>
         </div>
         <div class="sg-actions">
           <button class="nc-button nc-button--danger" type="button">Deaktivieren</button>
@@ -108,7 +170,10 @@
             </ol>
           </div>
         </div>
-        <details class="nc-disclosure"><summary>Technische Details</summary><p class="nc-text">Zusätzliche Informationen bleiben bei Bedarf erreichbar.</p></details>
+        <details class="nc-disclosure">
+          <summary>Technische Details</summary>
+          <div class="nc-disclosure__body"><p class="nc-text">Zusätzliche Informationen bleiben bei Bedarf erreichbar.</p></div>
+        </details>
         <pre class="nc-code"><code>server {
     server_name va.pepperz.de;
     listen 80;
@@ -167,6 +232,120 @@
         </div>
       </section>
 
+      <section class="sg-section" id="links">
+        <h2 class="nc-heading">Links im Text und als Symbol</h2>
+        <p class="nc-text">Die <a href="#formulare">Eingabefelder im Styleguide</a> zeigen die gewählte Gestaltung für deine Konfiguration. Links sind gelb und werden beim Darüberfahren unterstrichen.</p>
+        <div class="nc-row">
+          <span class="nc-text">Direktlink zu diesem Abschnitt</span>
+          <a class="nc-icon-link" href="#links" aria-label="Direktlink zum Abschnitt Links" title="Direktlink zum Abschnitt Links">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><path d="M10 7H7a5 5 0 0 0 0 10h3m4-10h3a5 5 0 0 1 0 10h-3M8 12h8"/></svg>
+          </a>
+        </div>
+      </section>
+
+      <section class="sg-section" id="navigation">
+        <h2 class="nc-heading">Navigation und Rückweg</h2>
+        <nav class="nc-nav" aria-label="Beispielnavigation" id="example-nav">
+          <a href="#navigation" aria-current="page">Projekte</a>
+          <a href="#navigation">Logs</a>
+        </nav>
+        <p class="nc-text" id="navigation-example-content" role="status">Projektübersicht</p>
+        <nav class="nc-breadcrumbs" aria-label="Beispielpfad im Config-Editor">
+          <a href="#navigation">Projekte</a><span aria-hidden="true">/</span>
+          <a href="#listen">vorspiel-abrechnung</a><span aria-hidden="true">/</span>
+          <span aria-current="page">va.pepperz.de.conf</span>
+        </nav>
+      </section>
+
+      <section class="sg-section" id="aktionsbanner">
+        <h2 class="nc-heading">Aktions- und Ergebnisbanner</h2>
+        <p class="nc-text">Ergebnisse bleiben sichtbar, bis du den Banner anklickst oder per Tastatur quittierst. Die Ausgabe lässt sich unabhängig davon aufklappen.</p>
+        <div class="nc-banner" role="status">
+          <strong class="nc-banner__title">Nginx-Prüfung läuft</strong>
+          <p class="nc-text">va.pepperz.de.conf wird geprüft. Weitere Änderungen sind währenddessen gesperrt.</p>
+        </div>
+        <div class="nc-banner nc-banner--success" data-result-banner>
+          <button class="nc-banner__ack" type="button" aria-label="Ergebnis quittieren: Prüfung erfolgreich"></button>
+          <div class="nc-banner__content">
+            <strong class="nc-banner__title">Prüfung erfolgreich</strong>
+            <p class="nc-text">va.pepperz.de.conf gespeichert. Nächster Schritt: Änderungen prüfen und committen.</p>
+          </div>
+          <details class="nc-disclosure">
+            <summary>Ausgabe der erfolgreichen Prüfung</summary>
+            <div class="nc-disclosure__body"><pre class="nc-code"><code>nginx: configuration file /etc/nginx/nginx.conf test is successful</code></pre></div>
+          </details>
+        </div>
+        <div class="nc-banner nc-banner--error" data-result-banner>
+          <button class="nc-banner__ack" type="button" aria-label="Ergebnis quittieren: Prüfung fehlgeschlagen"></button>
+          <div class="nc-banner__content">
+            <strong class="nc-banner__title">Prüfung fehlgeschlagen</strong>
+            <p class="nc-text">va.pepperz.de.conf gespeichert. Bitte Zeile 12 korrigieren und erneut prüfen.</p>
+          </div>
+          <details class="nc-disclosure">
+            <summary>Ausgabe der fehlgeschlagenen Prüfung</summary>
+            <div class="nc-disclosure__body"><pre class="nc-code"><code>nginx: [emerg] unexpected "}" in /opt/www/vorspiel-abrechnung/.nginx/va.pepperz.de.conf:12
+nginx: configuration file /etc/nginx/nginx.conf test failed</code></pre></div>
+          </details>
+        </div>
+        <p class="nc-text nc-text--small nc-feedback" id="banner-example-feedback" role="status"></p>
+        <div class="sg-actions"><button class="nc-button" type="button" id="restore-banner-examples">Banner-Beispiele wiederherstellen</button></div>
+      </section>
+
+      <section class="sg-section" id="diff">
+        <h2 class="nc-heading">Konfigurationsänderungen</h2>
+        <p class="nc-text">va.pepperz.de.conf: <span role="img" aria-label="Eine Zeile entfernt, eine Zeile hinzugefügt"><span class="nc-diff__removed" aria-hidden="true">-</span> <span class="nc-diff__added" aria-hidden="true">+</span></span></p>
+        <pre class="nc-code nc-diff" aria-label="Beispiel-Diff: Upstream-Port von 8000 auf 8001 geändert"><code><span class="nc-diff__header">--- a/.nginx/va.pepperz.de.conf
++++ b/.nginx/va.pepperz.de.conf
+@@ -3,3 +3,3 @@</span>
+     location / {
+<span class="nc-diff__removed">-        proxy_pass http://127.0.0.1:8000;</span>
+<span class="nc-diff__added">+        proxy_pass http://127.0.0.1:8001;</span>
+     }</code></pre>
+      </section>
+
+      <section class="sg-section" id="leere-zustaende">
+        <h2 class="nc-heading">Leere Zustände</h2>
+        <div class="sg-pair">
+          <div class="nc-empty">
+            <h3 class="nc-heading">Noch keine Projekte</h3>
+            <p class="nc-text">Lege das erste Projekt an, um seine Konfiguration zu verwalten.</p>
+            <div class="sg-actions"><a class="nc-button" href="#formulare">Projekt anlegen</a></div>
+          </div>
+          <div class="nc-empty">
+            <h3 class="nc-heading">Keine Logeinträge</h3>
+            <p class="nc-text">Für diesen Zeitraum liegen keine Einträge vor.</p>
+            <div class="sg-actions"><a class="nc-button" href="#scrollbereiche">Logbeispiel ansehen</a></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sg-section" id="kopieren">
+        <h2 class="nc-heading">Technische Werte kopieren</h2>
+        <div class="nc-list">
+          <div class="nc-row nc-copy-row"><span><span class="nc-row__sub">Domain</span><code id="copy-domain">va.pepperz.de</code></span><button class="nc-button" type="button" data-copy-target="copy-domain" data-copy-label="Domain" aria-label="Domain kopieren">Kopieren</button></div>
+          <div class="nc-row nc-copy-row"><span><span class="nc-row__sub">Pfad</span><code id="copy-path">/opt/www/vorspiel-abrechnung/.nginx/va.pepperz.de.conf</code></span><button class="nc-button" type="button" data-copy-target="copy-path" data-copy-label="Pfad" aria-label="Pfad kopieren">Kopieren</button></div>
+          <div class="nc-row nc-copy-row"><span><span class="nc-row__sub">SSH-Befehl für einen Login-Token</span><code id="copy-command">sudo -u nginx-config /opt/nginx-conf/.venv/bin/python -I /opt/nginx-conf/scripts/nginx-conf-login-token andy</code></span><button class="nc-button" type="button" data-copy-target="copy-command" data-copy-label="SSH-Befehl" aria-label="SSH-Befehl kopieren">Kopieren</button></div>
+        </div>
+        <p class="nc-text nc-text--small" id="copy-feedback" role="status">Die Kopieraktionen schreiben den jeweiligen Beispielwert in die Zwischenablage.</p>
+      </section>
+
+      <section class="sg-section" id="dialog">
+        <h2 class="nc-heading">Bestätigung und Dialog</h2>
+        <p class="nc-text">Das Beispiel zeigt das Zurücksetzen genau einer Konfigurationsdatei. Öffnen, Abbrechen und Bestätigen bleiben ohne Serveraktion.</p>
+        <div class="nc-row"><span>va.pepperz.de.conf<span class="nc-row__sub">vorspiel-abrechnung · <span role="img" aria-label="Eine Zeile entfernt, eine Zeile hinzugefügt"><span class="nc-diff__removed" aria-hidden="true">-</span> <span class="nc-diff__added" aria-hidden="true">+</span></span></span></span><button class="nc-button nc-button--danger" type="button" id="open-reset-example">Zurücksetzen</button></div>
+        <p class="nc-text nc-text--small nc-feedback" id="dialog-feedback" role="status"></p>
+        <dialog class="nc-dialog" id="reset-example" aria-labelledby="reset-example-title" aria-describedby="reset-example-description">
+          <h2 class="nc-heading" id="reset-example-title">Konfiguration zurücksetzen?</h2>
+          <p class="nc-text" id="reset-example-description">Die nicht committeten Änderungen dieser Datei werden verworfen. Anschließend wird die Nginx-Konfiguration erneut geprüft.</p>
+          <div class="nc-dialog__file"><span class="nc-row__sub">Betroffene Datei</span><code>/opt/www/vorspiel-abrechnung/.nginx/va.pepperz.de.conf</code></div>
+          <p class="nc-text nc-text--small">Diff: <span role="img" aria-label="Eine Zeile entfernt, eine Zeile hinzugefügt"><span class="nc-diff__removed" aria-hidden="true">-</span> <span class="nc-diff__added" aria-hidden="true">+</span></span></p>
+          <form method="dialog" class="nc-dialog__actions">
+            <button class="nc-button nc-button--quiet" value="cancel" autofocus>Abbrechen</button>
+            <button class="nc-button nc-button--danger" value="confirm">Zurücksetzen</button>
+          </form>
+        </dialog>
+      </section>
+
       <section class="sg-section" id="abstaende">
         <h2 class="nc-heading">Abstände und Form</h2>
         <p class="nc-text">4-Punkte-Raster. 32 px Außenabstand. Überall 0 px Radius. Keine Verläufe, keine Schatten.</p>
@@ -177,5 +356,137 @@
         </div>
       </section>
     </main>
+    <script>
+      // Enhance native datalists locally; no requests or saved values.
+      document.querySelectorAll('.nc-autocomplete').forEach(container => {
+        const input = container.querySelector('input');
+        const list = container.querySelector('[role="listbox"]');
+        const values = Array.from(input.list.options, option => option.value);
+        let matches = [];
+        let active = -1;
+        input.removeAttribute('list');
+        input.setAttribute('role', 'combobox');
+        input.setAttribute('aria-autocomplete', 'list');
+        input.setAttribute('aria-controls', list.id);
+        input.setAttribute('aria-expanded', 'false');
+
+        const close = () => {
+          list.hidden = true;
+          input.setAttribute('aria-expanded', 'false');
+          input.removeAttribute('aria-activedescendant');
+          active = -1;
+        };
+        const render = () => {
+          const query = input.value.trim().toLocaleLowerCase('de');
+          matches = values.filter(value => value.toLocaleLowerCase('de').includes(query));
+          list.replaceChildren();
+          active = matches.length ? 0 : -1;
+          input.removeAttribute('aria-activedescendant');
+          for (const [index, value] of matches.entries()) {
+            const item = document.createElement('li');
+            item.id = `${input.id}-option-${index}`;
+            item.setAttribute('role', 'option');
+            item.setAttribute('aria-selected', String(index === active));
+            item.textContent = value;
+            list.append(item);
+          }
+          if (!matches.length) {
+            const empty = document.createElement('li');
+            empty.className = 'nc-suggestions__empty';
+            empty.setAttribute('role', 'option');
+            empty.setAttribute('aria-disabled', 'true');
+            empty.setAttribute('aria-selected', 'false');
+            empty.textContent = 'Keine Vorschläge. Freie Eingabe möglich.';
+            list.append(empty);
+          }
+          if (matches.length) {
+            input.setAttribute('aria-activedescendant', list.firstElementChild.id);
+          }
+          list.hidden = false;
+          input.setAttribute('aria-expanded', 'true');
+        };
+        const choose = index => {
+          input.value = matches[index];
+          close();
+        };
+        input.addEventListener('focus', render);
+        input.addEventListener('click', () => { if (list.hidden) render(); });
+        input.addEventListener('input', render);
+        input.addEventListener('blur', close);
+        input.addEventListener('keydown', event => {
+          if (event.isComposing) return;
+          if (event.key === 'Escape') { close(); return; }
+          if (event.key === 'Enter' && !list.hidden && active >= 0) {
+            event.preventDefault();
+            choose(active);
+          }
+          if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+          event.preventDefault();
+          if (list.hidden) {
+            render();
+            if (event.key === 'ArrowDown') return;
+          }
+          if (!matches.length) return;
+          active = event.key === 'ArrowDown'
+            ? (active + 1) % matches.length
+            : (active <= 0 ? matches.length : active) - 1;
+          Array.from(list.children).forEach((item, index) => {
+            item.setAttribute('aria-selected', String(index === active));
+          });
+          input.setAttribute('aria-activedescendant', list.children[active].id);
+          list.children[active].scrollIntoView({block: 'nearest'});
+        });
+        list.addEventListener('mousedown', event => event.preventDefault());
+        list.addEventListener('click', event => {
+          const option = event.target.closest('[role="option"]');
+          if (option && !option.hasAttribute('aria-disabled')) {
+            choose(Array.from(list.children).indexOf(option));
+          }
+        });
+      });
+      // These examples only change local reference-page state.
+      document.querySelectorAll('[data-result-banner]').forEach(banner => {
+        banner.querySelector('button').addEventListener('click', () => {
+          banner.hidden = true;
+          document.getElementById('banner-example-feedback').textContent = 'Ergebnis quittiert.';
+        });
+      });
+      document.getElementById('restore-banner-examples').addEventListener('click', () => {
+        document.querySelectorAll('[data-result-banner]').forEach(banner => { banner.hidden = false; });
+        document.getElementById('banner-example-feedback').textContent = 'Banner-Beispiele wiederhergestellt.';
+      });
+      const exampleNav = document.getElementById('example-nav');
+      exampleNav.addEventListener('click', event => {
+        const link = event.target.closest('a');
+        if (!link) return;
+        event.preventDefault();
+        exampleNav.querySelectorAll('a').forEach(item => item.removeAttribute('aria-current'));
+        link.setAttribute('aria-current', 'page');
+        document.getElementById('navigation-example-content').textContent = link.textContent === 'Logs' ? 'Nginx-Logs' : 'Projektübersicht';
+      });
+      document.querySelectorAll('[data-copy-target]').forEach(button => {
+        button.addEventListener('click', async () => {
+          const feedback = document.getElementById('copy-feedback');
+          try {
+            await navigator.clipboard.writeText(document.getElementById(button.dataset.copyTarget).textContent);
+            feedback.className = 'nc-text nc-text--small';
+            feedback.textContent = `${button.dataset.copyLabel} kopiert.`;
+          } catch {
+            feedback.className = 'nc-error';
+            feedback.textContent = 'Kopieren nicht möglich. Bitte den Text markieren und manuell kopieren.';
+          }
+        });
+      });
+      const resetExample = document.getElementById('reset-example');
+      document.getElementById('open-reset-example').addEventListener('click', () => {
+        resetExample.returnValue = '';
+        resetExample.showModal();
+      });
+      resetExample.addEventListener('close', () => {
+        document.getElementById('dialog-feedback').textContent = resetExample.returnValue === 'confirm'
+          ? 'Zurücksetzen im Beispiel bestätigt.'
+          : 'Zurücksetzen abgebrochen.';
+      });
+    </script>
   </body>
 </html>
