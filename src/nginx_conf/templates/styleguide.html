@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Styleguide · nginx-conf</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styleguide.css') }}">
+  </head>
+  <body class="nc-page nc-theme-dark">
+    <header class="sg-header">
+      <div>
+        <h1 class="nc-display">nginx-conf / Styleguide</h1>
+        <p class="nc-text">Desktop. Dunkel. Source Code Pro.</p>
+      </div>
+      <nav aria-label="Styleguide"><a href="/">Zur App</a></nav>
+    </header>
+    <main class="sg-main">
+      <section class="sg-section" id="farben">
+        <h2 class="nc-heading">Farben</h2>
+        <p class="nc-text">Die Palette deiner Shell. Akzentfarben kennzeichnen Aktionen und Zustände.</p>
+        <div class="sg-swatches">
+          {% for label, color in [
+            ('Hintergrund', '#282C34'), ('Schrift', '#FFFFFF'),
+            ('Nebenzeile', '#C4C8C6'), ('Aktion', '#82A2BE'),
+            ('Erfolgreich', '#B6BD68'), ('Warnung', '#F0C674'),
+            ('Fehler', '#CC6566'), ('Information', '#B294BB')
+          ] %}
+          <div class="sg-swatch"><span class="sg-swatch__chip" style="background:{{ color }}"></span><b>{{ label }}</b><code>{{ color }}</code></div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="sg-section" id="typografie">
+        <h2 class="nc-heading">Typografie</h2>
+        <p class="nc-text">Source Code Pro, lokal geladen. Gerade Schrift, normale und fette Schnitte.</p>
+        <div class="nc-list">
+          <div class="nc-row"><span class="nc-display">Seitentitel</span><span class="nc-row__sub">28 px / 700</span></div>
+          <div class="nc-row"><span class="nc-heading">Abschnitt</span><span class="nc-row__sub">18 px / 700</span></div>
+          <div class="nc-row"><span>Lesetext, Eingaben und Aktionen</span><span class="nc-row__sub">15 px / 400</span></div>
+          <div class="nc-row"><span class="nc-row__sub">Nebenzeilen, Beschriftungen und Tabellen</span><span class="nc-row__sub">10 px / 400</span></div>
+        </div>
+      </section>
+
+      <section class="sg-section" id="formulare">
+        <h2 class="nc-heading">Eingabefelder</h2>
+        <p class="nc-text">Unterlinie, sichtbare Beschriftung und Fehler direkt am Feld.</p>
+        <div class="nc-form sg-form">
+          <label class="nc-label" for="project">Projektname</label>
+          <input class="nc-input" id="project" value="vorspiel-abrechnung">
+          <label class="nc-label" for="empty">Domain, leer</label>
+          <input class="nc-input" id="empty" placeholder="va.pepperz.de">
+          <label class="nc-label" for="invalid">Domain mit Fehler</label>
+          <input class="nc-input" id="invalid" value="https://" aria-invalid="true" aria-describedby="error">
+          <p class="nc-error" id="error">Bitte einen Domainnamen ohne Protokoll eingeben.</p>
+          <label class="nc-label" for="disabled">Nicht verfügbar</label>
+          <input class="nc-input" id="disabled" value="Aktion läuft" disabled>
+        </div>
+      </section>
+
+      <section class="sg-section" id="aktionen">
+        <h2 class="nc-heading">Aktionen</h2>
+        <p class="nc-text">Eckig, ohne Schatten. Die Hauptaktion steht rechts. Alle Beispiele bleiben ohne Serveraktion.</p>
+        <div class="sg-actions">
+          <button class="nc-button nc-button--quiet" type="button">Abbrechen</button>
+          <button class="nc-button" type="button">Speichern</button>
+        </div>
+        <div class="sg-actions">
+          <button class="nc-button nc-button--danger" type="button">Deaktivieren</button>
+          <button class="nc-button" type="button" disabled>Wird geprüft</button>
+        </div>
+      </section>
+
+      <section class="sg-section" id="hinweise">
+        <h2 class="nc-heading">Hinweise und Status</h2>
+        <p class="nc-text">Keine farbigen Karten oder Kapseln. Jeder Zustand wird ausdrücklich benannt.</p>
+        <p class="nc-hint"><span class="nc-hint__title">Information</span>Dieses Projekt enthält mehrere Startskripte.</p>
+        <p class="nc-hint nc-hint--warn"><span class="nc-hint__title">Zertifikat läuft ab</span>Bitte den Zertifikatsstatus prüfen.</p>
+        <p class="nc-hint nc-hint--error"><span class="nc-hint__title">Konfiguration fehlerhaft</span>Nginx kann diese Konfiguration nicht laden.</p>
+        <div class="sg-statuses">
+          <span class="nc-status">Inaktiv</span>
+          <span class="nc-status nc-status--success">Prüfung erfolgreich</span>
+          <span class="nc-status nc-status--warning">Läuft bald ab</span>
+          <span class="nc-status nc-status--error">Fehler</span>
+        </div>
+      </section>
+
+      <section class="sg-section" id="listen">
+        <h2 class="nc-heading">Listen und technische Details</h2>
+        <div class="nc-list">
+          <div class="nc-row"><span>vorspiel-abrechnung<span class="nc-row__sub">va.pepperz.de</span></span><span class="nc-status nc-status--success">Aktiv</span></div>
+          <div class="nc-row"><span>Nginx-Test</span><span class="nc-status nc-status--success">Erfolgreich</span></div>
+        </div>
+        <div class="sg-pair">
+          <div class="sg-specimen">
+            <h3 class="nc-heading">Voraussetzungen</h3>
+            <ul class="nc-content-list">
+              <li>Domain zeigt auf den Server.</li>
+              <li>Startskript ist ausgewählt.</li>
+              <li>Zertifikatsstatus ist geprüft.</li>
+            </ul>
+          </div>
+          <div class="sg-specimen">
+            <h3 class="nc-heading">Prüfreihenfolge</h3>
+            <ol class="nc-content-list">
+              <li>Konfiguration prüfen.</li>
+              <li>Änderungen vergleichen.</li>
+              <li>Nginx neu laden.</li>
+            </ol>
+          </div>
+        </div>
+        <details class="nc-disclosure"><summary>Technische Details</summary><p class="nc-text">Zusätzliche Informationen bleiben bei Bedarf erreichbar.</p></details>
+        <pre class="nc-code"><code>server {
+    server_name va.pepperz.de;
+    listen 80;
+}</code></pre>
+      </section>
+
+      <section class="sg-section" id="scrollbereiche">
+        <h2 class="nc-heading">Scrollbare Bereiche</h2>
+        <p class="nc-text">Lange Ausgaben und breite Tabellen scrollen innerhalb ihres Bereichs. Beide Beispiele sind auch per Tastatur erreichbar.</p>
+        <div class="sg-pair">
+          <div class="sg-specimen">
+            <h3 class="nc-heading">Logausgabe</h3>
+            <div class="nc-scroll" tabindex="0" role="region" aria-label="Scrollbare Logausgabe">
+              <pre class="nc-code"><code>{% for number in range(1, 17) %}10:42:{{ '%02d'|format(number) }} INFO  vorspiel-abrechnung | GET /abrechnung/2026/10/?ansicht=vollstaendig&amp;sortierung=datum | Status 200 | upstream 127.0.0.1:8000
+{% endfor %}</code></pre>
+            </div>
+          </div>
+          <div class="sg-specimen">
+            <h3 class="nc-heading">Breite Tabelle</h3>
+            <div class="nc-scroll" tabindex="0" role="region" aria-label="Horizontal scrollbare Projekttabelle">
+              <table class="nc-table">
+                <thead><tr><th>Projekt</th><th>Konfigurationsdatei</th><th>Domain</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr><td>vorspiel-abrechnung</td><td>/opt/www/vorspiel-abrechnung/.nginx/va.pepperz.de.conf</td><td>va.pepperz.de</td><td>Aktiv</td></tr>
+                  <tr><td>nginx-conf</td><td>/etc/nginx/sites-available/config.pepperz.de.conf</td><td>config.pepperz.de</td><td>Beispiel</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sg-section" id="auswahl">
+        <h2 class="nc-heading">Auswahl</h2>
+        <fieldset class="nc-choices" aria-label="Beispielumgebung">
+          <label><input type="radio" name="environment" value="test" checked><span>Test</span></label>
+          <label><input type="radio" name="environment" value="production"><span>Produktion</span></label>
+        </fieldset>
+        <div class="nc-list">
+          <label class="nc-row"><span>Aktiviert</span><input class="nc-checkbox" type="checkbox" checked></label>
+          <label class="nc-row"><span>Deaktiviert</span><input class="nc-checkbox" type="checkbox"></label>
+          <label class="nc-row"><span>Nicht verfügbar</span><input class="nc-checkbox" type="checkbox" disabled></label>
+        </div>
+      </section>
+
+      <section class="sg-section" id="tabelle">
+        <h2 class="nc-heading">Tabelle</h2>
+        <div class="nc-table-wrap">
+          <table class="nc-table">
+            <thead><tr><th>Projekt</th><th>Domain</th><th>Status</th><th class="nc-table__num">Port</th></tr></thead>
+            <tbody>
+              <tr><td>vorspiel-abrechnung</td><td>va.pepperz.de</td><td><span class="nc-status nc-status--success">Aktiv</span></td><td class="nc-table__num">8000</td></tr>
+              <tr><td>nginx-conf</td><td>config.pepperz.de</td><td><span class="nc-status">Beispiel</span></td><td class="nc-table__num">8765</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="sg-section" id="abstaende">
+        <h2 class="nc-heading">Abstände und Form</h2>
+        <p class="nc-text">4-Punkte-Raster. 32 px Außenabstand. Überall 0 px Radius. Keine Verläufe, keine Schatten.</p>
+        <div class="sg-tokens">
+          {% for size in [4, 8, 12, 16, 24, 32, 48] %}
+          <div class="sg-token"><span class="sg-space" style="--example-size:{{ size }}px"></span><span>{{ size }} px</span></div>
+          {% endfor %}
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from nginx_conf.auth import (
@@ -78,11 +79,19 @@ from nginx_conf.system_actions import (
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 app = FastAPI(title="Nginx-Verwaltungstool")
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 PROJECT_ROOT = Path("/opt/www")
 SITES_ENABLED_ROOT = Path("/etc/nginx/sites-enabled")
 DATABASE_PATH = default_database_path()
 LETSENCRYPT_ROOT = Path("/etc/letsencrypt")
-PUBLIC_PATHS = {"/health", "/setup", "/api/setup"}
+PUBLIC_PATHS = {
+    "/health",
+    "/setup",
+    "/api/setup",
+    "/static/styleguide.css",
+    "/static/fonts/source-code-pro-regular.woff2",
+    "/static/fonts/source-code-pro-bold.woff2",
+}
 
 
 @app.middleware("http")
@@ -788,6 +797,11 @@ def config_detail(request: Request, project_name: str, config_name: str) -> Resp
             "last_action_result": db.get_last_unacknowledged_result(),
         },
     )
+
+
+@app.get("/styleguide", response_class=HTMLResponse)
+def styleguide(request: Request) -> Response:
+    return templates.TemplateResponse(request, "styleguide.html")
 
 
 @app.get("/health")

@@ -75,7 +75,12 @@ bereits gespeicherte Auswahl verwenden.
 - Webframework: FastAPI
 - Templates: Jinja2
 - Frontend-Interaktion: HTMX, wenn es konkrete Workflows vereinfacht
-- Styling: Bulma als naheliegende schlanke Option
+- Gestaltungsgrundlage: eigener Styleguide aus Vorspiel-Abrechnung, dokumentiert
+  in `docs/styleguide.md` und unter `/styleguide` als geschuetzte Referenz.
+  Ausschliesslich Desktop und Dunkelmodus, Source Code Pro, Farben aus der
+  Ghostty-Shell-Palette, eckige Elemente ohne Rundungen, Schatten oder Verlaeufe.
+  Hellmodus und mobile Gestaltung gehoeren nicht zum Projektumfang.
+  Die vorhandenen App-Seiten sind noch nicht darauf umgestellt.
 - Config-Editor: zuerst normales `<textarea>`, spaeter optional CodeMirror
 - Betrieb der Verwaltungs-App: systemd als eigener unprivilegierter Systemuser
 - Betrieb von Nginx: systemd

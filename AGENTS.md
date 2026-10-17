@@ -21,6 +21,9 @@
 
 ## Arbeitsweise
 
+- Die Oberflaeche ist ausschliesslich fuer Desktop im Dunkelmodus vorgesehen. Keine Hellmodus- oder Mobile-Varianten planen, implementieren oder zur Abnahme verlangen.
+- Der eigene Styleguide nutzt Source Code Pro, die Ghostty-Shell-Palette und eckige, minimale Elemente ohne Rundungen, Schatten oder Verlaeufe. Details stehen in `docs/styleguide.md`.
+
 - Halte Aenderungen klein und nachvollziehbar.
 - Bevorzuge vorhandene Projektentscheidungen gegenueber neuen Abstraktionen.
 - Keine freie Shell-Ausfuehrung als Webfeature planen oder implementieren.
