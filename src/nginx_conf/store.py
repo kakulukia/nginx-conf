@@ -376,6 +376,13 @@ class AppDatabase:
         with self._connect() as connection:
             connection.execute("delete from ui_state where key = ?", (key,))
 
+    def consume_ui_state(self, key: str, expected: dict[str, Any]) -> bool:
+        with self._connect() as connection:
+            result = connection.execute(
+                "delete from ui_state where key = ? and value_json = ?", (key, _json_dump(expected))
+            )
+        return result.rowcount == 1
+
     def count_users(self) -> int:
         with self._connect() as connection:
             row = connection.execute("select count(*) as count from users").fetchone()
@@ -397,6 +404,11 @@ class AppDatabase:
     def get_user(self, user_id: int) -> User | None:
         with self._connect() as connection:
             row = connection.execute("select * from users where id = ?", (user_id,)).fetchone()
+        return _user_from_row(row) if row is not None else None
+
+    def get_user_by_username(self, username: str) -> User | None:
+        with self._connect() as connection:
+            row = connection.execute("select * from users where username = ?", (username,)).fetchone()
         return _user_from_row(row) if row is not None else None
 
     def create_session(self, *, user_id: int, session_hash: str, expires_at: str) -> None:

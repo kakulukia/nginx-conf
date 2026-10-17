@@ -1,6 +1,6 @@
 # Admin-IP-Allowlist
 
-Die Admin-Domain `config.mamasystems.de` bleibt oeffentlich erreichbar, wird
+Die Admin-Domain `config.pepperz.de` bleibt oeffentlich erreichbar, wird
 aber durch ein Nginx-Snippet auf erlaubte Quell-IPs begrenzt.
 
 Zielpfad auf dem Server:

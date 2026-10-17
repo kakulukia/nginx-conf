@@ -12,6 +12,8 @@ from nginx_conf.auth import (
     AuthError,
     complete_setup,
     ensure_setup_token,
+    login_with_token,
+    logout,
     setup_client_allowed,
     setup_token_path_for_database,
     user_for_session,
@@ -88,6 +90,8 @@ PUBLIC_PATHS = {
     "/health",
     "/setup",
     "/api/setup",
+    "/login",
+    "/api/login",
     "/static/styleguide.css",
     "/static/favicon.svg",
     "/static/fonts/source-code-pro-regular.woff2",
@@ -97,6 +101,9 @@ PUBLIC_PATHS = {
 
 @app.middleware("http")
 async def require_session(request: Request, call_next):
+    origin = request.headers.get("origin")
+    if request.method == "POST" and origin and origin.rstrip("/") != str(request.base_url).rstrip("/"):
+        return JSONResponse({"detail": "Origin not allowed"}, status_code=403)
     if request.url.path in PUBLIC_PATHS:
         if request.url.path in {"/setup", "/api/setup"}:
             db = get_database()
@@ -114,7 +121,7 @@ async def require_session(request: Request, call_next):
     if user is None:
         if request.url.path.startswith("/api/"):
             return JSONResponse({"detail": "Authentication required"}, status_code=401)
-        return RedirectResponse("/setup", status_code=303)
+        return RedirectResponse("/login", status_code=303)
     request.state.user = user
     return await call_next(request)
 
@@ -178,17 +185,10 @@ def setup_page(request: Request) -> Response:
     if db.count_users() > 0:
         if user_for_session(db, request.cookies.get(SESSION_COOKIE_NAME)):
             return RedirectResponse("/", status_code=303)
-        return HTMLResponse("Setup ist abgeschlossen. Gueltige Session erforderlich.", status_code=403)
+        return RedirectResponse("/login", status_code=303)
     token_path = setup_token_path_for_database(DATABASE_PATH)
     ensure_setup_token(db, token_path=token_path)
-    return templates.TemplateResponse(
-        request,
-        "setup.html",
-        {
-            "title": "Initial-Setup",
-            "setup_token_path": token_path,
-        },
-    )
+    return _auth_form(request, login_mode=False)
 
 
 @app.post("/api/setup")
@@ -204,10 +204,66 @@ async def setup_api(request: Request) -> Response:
             token_path=setup_token_path_for_database(DATABASE_PATH),
         )
     except (AuthError, ValueError) as error:
+        if "application/json" not in request.headers.get("content-type", ""):
+            return _auth_form(request, login_mode=False, error=str(error))
         return JSONResponse({"ok": False, "detail": str(error)}, status_code=400)
 
-    response = JSONResponse({"ok": True, "username": result.user.username})
-    _set_session_cookie(response, result.session_token)
+    response = (
+        JSONResponse({"ok": True, "username": result.user.username})
+        if "application/json" in request.headers.get("content-type", "")
+        else RedirectResponse("/", status_code=303)
+    )
+    _set_session_cookie(response, result.session_token, secure=request.url.scheme == "https")
+    return response
+
+
+def _auth_form(request: Request, *, login_mode: bool, error: str | None = None) -> Response:
+    return templates.TemplateResponse(
+        request,
+        "setup.html",
+        {
+            "title": "Anmelden" if login_mode else "Initial-Setup",
+            "login_mode": login_mode,
+            "setup_token_path": setup_token_path_for_database(DATABASE_PATH),
+            "error": error,
+        },
+        status_code=400 if error else 200,
+    )
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request) -> Response:
+    db = get_database()
+    if db.count_users() == 0:
+        return RedirectResponse("/setup", status_code=303)
+    if user_for_session(db, request.cookies.get(SESSION_COOKIE_NAME)):
+        return RedirectResponse("/", status_code=303)
+    return _auth_form(request, login_mode=True)
+
+
+@app.post("/api/login")
+async def login_api(request: Request) -> Response:
+    try:
+        payload = await _request_payload(request)
+        result = login_with_token(get_database(), str(payload.get("login_token") or "").strip())
+    except (AuthError, ValueError) as error:
+        if "application/json" not in request.headers.get("content-type", ""):
+            return _auth_form(request, login_mode=True, error=str(error))
+        return JSONResponse({"ok": False, "detail": str(error)}, status_code=400)
+    response = (
+        JSONResponse({"ok": True})
+        if "application/json" in request.headers.get("content-type", "")
+        else RedirectResponse("/", status_code=303)
+    )
+    _set_session_cookie(response, result.session_token, secure=request.url.scheme == "https")
+    return response
+
+
+@app.post("/api/logout")
+def logout_api(request: Request) -> Response:
+    logout(get_database(), request.cookies.get(SESSION_COOKIE_NAME))
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(SESSION_COOKIE_NAME)
     return response
 
 
@@ -461,7 +517,7 @@ async def pm2_create_api(project_name: str, request: Request) -> dict[str, objec
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
-    if result.result.exit_code == 0:
+    if result.result.exit_code == 0 or result.result.state_changed:
         db.register_pm2_process(
             project_name=project.project_name,
             pm2_name=pm2_name,
@@ -483,7 +539,7 @@ def pm2_lifecycle_api(project_name: str, pm2_name: str, operation: str) -> dict[
         raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    if operation == "delete" and result.result.exit_code == 0:
+    if operation == "delete" and (result.result.exit_code == 0 or result.result.state_changed):
         db.unregister_pm2_process(project_name=project_name, pm2_name=pm2_name)
     return _system_action_result_to_dict(result)
 
@@ -962,7 +1018,9 @@ def _issue_certbot_for_block(project_name: str, config_name: str, block_ordinal:
         return response
 
     try:
-        certbot_result = get_system_action_service(db).run(certbot_issue_command(block.server_names))
+        certbot_result = get_system_action_service(db).run(
+            certbot_issue_command(block.server_names, project=project.project_name, config_path=config.config_path)
+        )
     except ActionLockError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     response["certbot"] = _system_action_result_to_dict(certbot_result)
@@ -1144,11 +1202,12 @@ def _server_ips_from_payload(value: object) -> list[str]:
     raise ValueError("server_ips must be a string or string list")
 
 
-def _set_session_cookie(response: Response, session_token: str) -> None:
+def _set_session_cookie(response: Response, session_token: str, *, secure: bool) -> None:
     response.set_cookie(
         SESSION_COOKIE_NAME,
         session_token,
         httponly=True,
+        secure=secure,
         samesite="lax",
         max_age=60 * 60 * 24 * 30,
     )

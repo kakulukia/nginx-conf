@@ -7,7 +7,7 @@
     <title>{{ title }}</title>
     <style>
       :root {
-        color-scheme: light dark;
+        color-scheme: light;
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
 
@@ -30,37 +30,54 @@
       }
 
       input,
-      textarea,
-      button {
+      textarea {
         box-sizing: border-box;
         width: 100%;
         margin-top: 0.35rem;
+        padding: 0.5rem;
       }
+
+      .actions { display: flex; justify-content: flex-end; margin-top: 1rem; }
+      button { padding: 0.5rem 0.8rem; }
+      .error { color: #a61b1b; }
+      code { overflow-wrap: anywhere; }
 
       .meta {
         color: #536171;
         font-size: 0.92rem;
+        overflow-wrap: anywhere;
       }
     </style>
   </head>
   <body>
     <main>
       <h1>{{ title }}</h1>
+      {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+      {% if login_mode %}
+      <p class="meta">Erzeuge per SSH einen einmaligen Login-Token. Er ist zehn Minuten gültig.</p>
+      <details>
+        <summary>SSH-Befehl</summary>
+        <p><code>sudo -u nginx-config /opt/nginx-conf/.venv/bin/python -I /opt/nginx-conf/scripts/nginx-conf-login-token &lt;Nutzername&gt;</code></p>
+      </details>
+      {% else %}
       <p class="meta">Setup-Token: {{ setup_token_path }}</p>
-      <form action="/api/setup" method="post">
+      {% endif %}
+      <form action="{{ '/api/login' if login_mode else '/api/setup' }}" method="post">
         <label>
-          Setup-Token
-          <input name="setup_token" autocomplete="one-time-code" required>
+          {{ 'Login-Token' if login_mode else 'Setup-Token' }}
+          <input name="{{ 'login_token' if login_mode else 'setup_token' }}" autocomplete="one-time-code" required>
         </label>
+        {% if not login_mode %}
         <label>
           Nutzername
           <input name="username" value="admin" autocomplete="username" required>
         </label>
         <label>
-          Server-IP-Adressen fuer DNS-Preflight
+          Öffentliche Server-IP-Adressen
           <textarea name="server_ips" rows="3"></textarea>
         </label>
-        <button type="submit">Setup abschliessen</button>
+        {% endif %}
+        <div class="actions"><button type="submit">{{ 'Anmelden' if login_mode else 'Setup abschließen' }}</button></div>
       </form>
     </main>
   </body>

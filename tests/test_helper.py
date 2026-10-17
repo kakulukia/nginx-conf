@@ -389,3 +389,59 @@ def test_missing_git_repo_blocks_before_write(tmp_path: Path) -> None:
     assert response["ok"] is False
     assert "Git repository" in response["error"]
     assert config.read_text(encoding="utf-8") == "server { listen 80; }\n"
+
+
+def test_certbot_helper_checks_active_selected_config_and_action_domains(monkeypatch, tmp_path: Path) -> None:
+    from nginx_conf.system_actions import certbot_issue_command
+
+    project_root, project, config, db = create_repo_project(tmp_path)
+    enabled = tmp_path / "enabled"
+    enabled.mkdir()
+    (enabled / "demo-app").symlink_to(config)
+    domains = ["old.example.com"]
+    command = certbot_issue_command(domains, project="demo-app", config_path=config)
+    action_id = db.create_action(
+        action_type=command.action_type,
+        target=command.target,
+        project=command.project,
+        config_path=config,
+        expected_file=config,
+        subcommand=command.subcommand,
+        parameters=command.parameters,
+    )
+    calls = []
+    real_run = subprocess.run
+
+    def fake_certbot(argv, **kwargs):
+        if argv[0] == "/usr/bin/certbot":
+            calls.append(argv)
+            return subprocess.CompletedProcess(argv, 0, "issued", "")
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(helper_module.subprocess, "run", fake_certbot)
+    for bad in (["other.example.com"], ["--config"], [], [None]):
+        code, _ = handle_helper_request(
+            "certbot-issue",
+            request_payload(action_id, "certbot-issue", config, domains=bad),
+            db_path=db.path,
+            project_root=project_root,
+            enabled_root=enabled,
+        )
+        assert code == 1
+    assert calls == []
+    payload = request_payload(action_id, "certbot-issue", config, domains=domains)
+    code, result = handle_helper_request(
+        "certbot-issue", payload, db_path=db.path, project_root=project_root, enabled_root=enabled
+    )
+    assert code == 0 and result["ok"]
+    assert calls == [command.argv]
+    (enabled / "demo-app").unlink()
+    code, _ = handle_helper_request(
+        "certbot-issue", payload, db_path=db.path, project_root=project_root, enabled_root=enabled
+    )
+    assert code == 1 and len(calls) == 1
+    db.finish_action(action_id, status="succeeded")
+    code, _ = handle_helper_request(
+        "certbot-issue", payload, db_path=db.path, project_root=project_root, enabled_root=enabled
+    )
+    assert code == 1 and len(calls) == 1

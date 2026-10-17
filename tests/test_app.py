@@ -1392,3 +1392,70 @@ def test_health() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_login_form_redirects_sets_secure_cookie_and_rejects_reuse(monkeypatch, tmp_path) -> None:
+    from nginx_conf.auth import issue_login_token
+
+    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "auth.sqlite3")
+    db = main.get_database()
+    db.create_user("andy")
+    token = issue_login_token(db, "andy")
+    browser = TestClient(main.app, base_url="https://config.pepperz.de", follow_redirects=False)
+    assert browser.get("/").headers["location"] == "/login"
+    assert "Login-Token" in browser.get("/login").text
+    for payload in ({}, {"login_token": "wrong"}):
+        response = browser.post("/api/login", data=payload)
+        assert response.status_code == 400
+        assert 'role="alert"' in response.text
+    assert (
+        browser.post(
+            "/api/login", data={"login_token": token}, headers={"Origin": "https://foreign.example"}
+        ).status_code
+        == 403
+    )
+    response = browser.post("/api/login", data={"login_token": token})
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+    assert "Secure" in response.headers["set-cookie"]
+    assert "HttpOnly" in response.headers["set-cookie"]
+    session = browser.cookies.get(SESSION_COOKIE_NAME)
+    assert browser.get("/login").headers["location"] == "/"
+    assert browser.post("/api/logout").headers["location"] == "/login"
+    from nginx_conf.auth import user_for_session
+
+    assert user_for_session(db, session) is None
+    assert browser.post("/api/login", json={"login_token": token}).status_code == 400
+
+
+def test_setup_html_form_redirects_and_reports_invalid_input(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "auth.sqlite3")
+    browser = TestClient(main.app, follow_redirects=False)
+    browser.get("/setup")
+    token = setup_token_path_for_database(main.DATABASE_PATH).read_text().strip()
+    for data in ({"setup_token": "wrong"}, {"setup_token": token, "username": "andy", "server_ips": "invalid"}):
+        response = browser.post("/api/setup", data=data)
+        assert response.status_code == 400 and 'role="alert"' in response.text
+    response = browser.post("/api/setup", data={"setup_token": token, "username": "andy", "server_ips": "81.169.200.21"})
+    assert response.status_code == 303 and response.headers["location"] == "/"
+    assert main.get_database().count_users() == 1
+
+
+def test_pm2_save_failure_keeps_registry_consistent_with_real_create_and_delete(monkeypatch, tmp_path) -> None:
+    configure_pm2_project_roots(monkeypatch, tmp_path)
+
+    class PartialService:
+        def run(self, command):
+            return SystemActionResult(
+                action_id="partial",
+                command=command,
+                result=CommandResult(1, "changed", "save failed", state_changed=True),
+            )
+
+    monkeypatch.setattr(main, "get_system_action_service", lambda db: PartialService())
+    response = client.post("/api/projects/demo-app/pm2/create", json={"pm2_name": "demo-app"})
+    assert response.status_code == 200 and response.json()["ok"] is False
+    assert len(main.get_database().list_managed_pm2_processes("demo-app")) == 1
+    response = client.post("/api/projects/demo-app/pm2/demo-app/delete")
+    assert response.status_code == 200 and response.json()["ok"] is False
+    assert main.get_database().list_managed_pm2_processes("demo-app") == []

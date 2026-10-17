@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from nginx_conf.system_actions import (
     CommandResult,
     CommandValidationError,
     PathValidationError,
+    SubprocessCommandRunner,
     SystemActionService,
     certbot_issue_command,
     certbot_renew_dry_run_command,
@@ -238,3 +240,48 @@ def test_system_action_service_rejects_parallel_action_starts(tmp_path: Path) ->
 
     with pytest.raises(ActionLockError):
         service.run(nginx_reload_command(), action_id="reload")
+
+
+def test_real_runner_uses_noninteractive_sudo_only_for_fixed_privileged_commands(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, "ok", "")
+
+    monkeypatch.setattr("nginx_conf.system_actions.subprocess.run", fake_run)
+    runner = SubprocessCommandRunner()
+    for command in (nginx_test_command(), nginx_reload_command(), certbot_renew_dry_run_command()):
+        runner.run(command.argv, stdin=None, timeout_seconds=120)
+        assert calls[-1][0] == ["/usr/bin/sudo", "-n", *command.argv]
+        assert calls[-1][1]["shell"] is False
+    runner.run(("/usr/local/lib/nginx-conf/nginx-conf-helper", "write-config"), stdin="{}", timeout_seconds=120)
+    assert calls[-1][0][:2] == ["/usr/bin/sudo", "-n"]
+    runner.run(certbot_issue_command(("example.com",)).argv, stdin="{}", timeout_seconds=120)
+    assert calls[-1][0] == ["/usr/bin/sudo", "-n", "/usr/local/lib/nginx-conf/nginx-conf-helper", "certbot-issue"]
+    runner.run(pm2_lifecycle_command("restart", "demo-app").argv, stdin=None, timeout_seconds=120)
+    assert calls[-2][0] == ["/usr/bin/pm2", "restart", "demo-app"]
+    assert calls[-1][0] == ("/usr/bin/pm2", "save", "--force")
+    with pytest.raises(CommandValidationError):
+        runner.run(("/usr/local/lib/nginx-conf/nginx-conf-helper", "shell"), stdin=None, timeout_seconds=120)
+    with pytest.raises(CommandValidationError):
+        runner.run(("/usr/bin/certbot", "--config", "/tmp/arbitrary"), stdin=None, timeout_seconds=120)
+
+
+@pytest.mark.parametrize("mutation_exit,save_exit,expected_calls", [(0, 1, 2), (1, 0, 1)])
+def test_pm2_snapshot_failure_reports_error_without_losing_actual_process_change(
+    monkeypatch, mutation_exit, save_exit, expected_calls
+) -> None:
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, save_exit if len(calls) == 2 else mutation_exit, "", "failure")
+
+    monkeypatch.setattr("nginx_conf.system_actions.subprocess.run", fake_run)
+    result = SubprocessCommandRunner().run(
+        pm2_lifecycle_command("start", "demo-app").argv, stdin=None, timeout_seconds=120
+    )
+    assert result.exit_code == 1
+    assert result.state_changed is (mutation_exit == 0)
+    assert len(calls) == expected_calls

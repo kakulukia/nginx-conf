@@ -1,0 +1,8 @@
+#!/opt/nginx-conf/.venv/bin/python -I
+import sys
+
+sys.path.insert(0, "/opt/nginx-conf/src")
+
+from nginx_conf.auth import login_token_cli
+
+raise SystemExit(login_token_cli())

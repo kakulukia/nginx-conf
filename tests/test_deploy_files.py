@@ -10,8 +10,13 @@ def test_systemd_unit_runs_as_dedicated_unprivileged_user() -> None:
     assert "Group=nginx-config" in service
     assert "User=root" not in service
     assert "Group=root" not in service
-    assert "ReadWritePaths=/opt/nginx-config" in service
-    assert "ReadOnlyPaths=/opt/www /etc/nginx /etc/letsencrypt" in service
+    assert "ReadWritePaths=/opt/nginx-config /opt/www /etc/nginx /etc/letsencrypt" in service
+    assert "ProtectSystem=strict" in service
+    assert "ProtectHome=true" in service
+    assert "NoNewPrivileges=false" in service
+    assert "PrivateTmp=false" in service
+    assert "--app-dir /opt/nginx-conf/src" in service
+    assert "PM2_HOME=/opt/nginx-config/.pm2" in service
 
 
 def test_sudoers_file_uses_fixed_commands_without_wildcards() -> None:

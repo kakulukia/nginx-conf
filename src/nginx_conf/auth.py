@@ -13,6 +13,8 @@ SESSION_COOKIE_NAME = "nginx_conf_session"
 SETUP_STATE_KEY = "auth.setup_token"
 SETUP_TOKEN_FILENAME = "setup-token"
 SESSION_TTL_DAYS = 30
+LOGIN_STATE_KEY = "auth.login_token"
+LOGIN_TOKEN_TTL_MINUTES = 10
 
 
 class AuthError(ValueError):
@@ -70,6 +72,50 @@ def create_session(db: AppDatabase, user: User) -> str:
     expires_at = (datetime.now(UTC) + timedelta(days=SESSION_TTL_DAYS)).isoformat(timespec="seconds")
     db.create_session(user_id=user.id, session_hash=_hash_token(session_token), expires_at=expires_at)
     return session_token
+
+
+def issue_login_token(db: AppDatabase, username: str) -> str:
+    user = db.get_user_by_username(username)
+    if user is None:
+        raise AuthError("Nutzer nicht gefunden. Zuerst Initial-Setup abschliessen.")
+    token = secrets.token_urlsafe(32)
+    expires_at = (datetime.now(UTC) + timedelta(minutes=LOGIN_TOKEN_TTL_MINUTES)).isoformat(timespec="seconds")
+    db.set_ui_state(LOGIN_STATE_KEY, {"token_hash": _hash_token(token), "user_id": user.id, "expires_at": expires_at})
+    return token
+
+
+def login_with_token(db: AppDatabase, token: str) -> SetupResult:
+    state = db.get_ui_state(LOGIN_STATE_KEY)
+    if not state or not secrets.compare_digest(str(state.get("token_hash", "")), _hash_token(token)):
+        raise AuthError("Login-Token ist ungueltig oder abgelaufen.")
+    if state["expires_at"] <= _now():
+        raise AuthError("Login-Token ist ungueltig oder abgelaufen.")
+    user = db.get_user(state["user_id"])
+    if user is None or not db.consume_ui_state(LOGIN_STATE_KEY, state):
+        raise AuthError("Login-Token ist ungueltig oder bereits verwendet.")
+    return SetupResult(user=user, session_token=create_session(db, user))
+
+
+def logout(db: AppDatabase, token: str | None) -> None:
+    if token:
+        db.delete_session(_hash_token(token))
+
+
+def login_token_cli() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Create a one-time nginx-conf login token over SSH")
+    parser.add_argument("username")
+    parser.add_argument("--database", type=Path, default=AppDatabase().path)
+    args = parser.parse_args()
+    if not args.database.is_file():
+        parser.exit(1, "Datenbank fehlt. Zuerst Initial-Setup abschliessen.\n")
+    try:
+        token = issue_login_token(AppDatabase(args.database), args.username)
+    except (AuthError, OSError) as error:
+        parser.exit(1, f"{error}\n")
+    print(token)
+    return 0
 
 
 def user_for_session(db: AppDatabase, session_token: str | None) -> User | None:

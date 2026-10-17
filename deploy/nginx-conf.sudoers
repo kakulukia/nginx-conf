@@ -11,6 +11,7 @@ Cmnd_Alias NGINX_CONF_HELPER = \
     /usr/local/lib/nginx-conf/nginx-conf-helper write-config, \
     /usr/local/lib/nginx-conf/nginx-conf-helper reset-config-to-head, \
     /usr/local/lib/nginx-conf/nginx-conf-helper commit-config, \
-    /usr/local/lib/nginx-conf/nginx-conf-helper clone-project
+    /usr/local/lib/nginx-conf/nginx-conf-helper clone-project, \
+    /usr/local/lib/nginx-conf/nginx-conf-helper certbot-issue
 
 NGINX_CONF_APP ALL=(root) NOPASSWD: NGINX_CONF_NGINX, NGINX_CONF_CERTBOT, NGINX_CONF_HELPER

@@ -16,6 +16,7 @@ SYSTEMCTL_BIN = "/bin/systemctl"
 CERTBOT_BIN = "/usr/bin/certbot"
 PM2_BIN = "/usr/bin/pm2"
 CONFIG_HELPER_BIN = "/usr/local/lib/nginx-conf/nginx-conf-helper"
+SUDO_BIN = "/usr/bin/sudo"
 CERTBOT_EMAIL = "andy@freilandkiwis.de"
 DEFAULT_TIMEOUT_SECONDS = 120
 LONG_RUNNING_TIMEOUT_SECONDS = 1800
@@ -40,6 +41,7 @@ class CommandResult:
     exit_code: int
     stdout: str
     stderr: str
+    state_changed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +72,24 @@ class CommandRunner(Protocol):
 
 class SubprocessCommandRunner:
     def run(self, argv: tuple[str, ...], *, stdin: str | None, timeout_seconds: int) -> CommandResult:
+        if argv in {nginx_test_command().argv, nginx_reload_command().argv, certbot_renew_dry_run_command().argv}:
+            argv = (SUDO_BIN, "-n", *argv)
+        elif len(argv) == 2 and argv[0] == CONFIG_HELPER_BIN:
+            if argv[1] not in {
+                "activate-config",
+                "deactivate-config",
+                "write-config",
+                "reset-config-to-head",
+                "commit-config",
+                "clone-project",
+            }:
+                raise CommandValidationError("Unsupported privileged helper command")
+            argv = (SUDO_BIN, "-n", *argv)
+        elif argv and argv[0] == CERTBOT_BIN:
+            domains = argv[9:-1:2]
+            if certbot_issue_command(domains).argv != argv:
+                raise CommandValidationError("Unsupported privileged Certbot command")
+            argv = (SUDO_BIN, "-n", CONFIG_HELPER_BIN, "certbot-issue")
         completed = subprocess.run(
             list(argv),
             input=stdin,
@@ -79,6 +99,22 @@ class SubprocessCommandRunner:
             shell=False,
             timeout=timeout_seconds,
         )
+        if completed.returncode == 0 and len(argv) > 1 and argv[0] == PM2_BIN and argv[1] in PM2_OPERATIONS_WITH_NAME:
+            saved = subprocess.run(
+                (PM2_BIN, "save", "--force"),
+                capture_output=True,
+                text=True,
+                check=False,
+                shell=False,
+                timeout=DEFAULT_TIMEOUT_SECONDS,
+            )
+            if saved.returncode != 0:
+                return CommandResult(
+                    saved.returncode,
+                    completed.stdout,
+                    "PM2-Aktion ausgefuehrt, aber Prozessliste nicht gespeichert: " + saved.stderr,
+                    state_changed=True,
+                )
         return CommandResult(
             exit_code=completed.returncode,
             stdout=completed.stdout,
@@ -106,6 +142,16 @@ class SystemActionService:
     def run(self, command: CommandSpec, *, action_id: str | None = None) -> SystemActionResult:
         action_id = self.start_background_action(command, action_id=action_id)
         stdin = json.dumps(command.stdin_json, sort_keys=True) if command.stdin_json is not None else None
+        if command.action_type == "certbot-issue":
+            stdin = json.dumps(
+                {
+                    "action_id": action_id,
+                    "project": command.project,
+                    "config_path": str(command.config_path) if command.config_path else None,
+                    "expected_file": str(command.expected_file) if command.expected_file else None,
+                    "domains": (command.parameters or {}).get("domains"),
+                }
+            )
         try:
             self.db.mark_action_running(action_id)
             result = self.runner.run(command.argv, stdin=stdin, timeout_seconds=command.timeout_seconds)
@@ -167,7 +213,9 @@ def nginx_reload_command() -> CommandSpec:
     )
 
 
-def certbot_issue_command(domains: tuple[str, ...] | list[str]) -> CommandSpec:
+def certbot_issue_command(
+    domains: tuple[str, ...] | list[str], *, project: str | None = None, config_path: Path | None = None
+) -> CommandSpec:
     normalized_domains = tuple(domains)
     _validate_certbot_domains(normalized_domains)
     domain_args = tuple(arg for domain in normalized_domains for arg in ("-d", domain))
@@ -175,6 +223,9 @@ def certbot_issue_command(domains: tuple[str, ...] | list[str]) -> CommandSpec:
         action_type="certbot-issue",
         subcommand="certbot-issue",
         target=", ".join(normalized_domains),
+        project=project,
+        config_path=config_path,
+        expected_file=config_path,
         argv=(
             CERTBOT_BIN,
             "--nginx",

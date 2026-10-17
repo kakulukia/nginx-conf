@@ -142,7 +142,7 @@ ohne Shell auf. Die erwarteten absoluten Programme sind:
   `restart`, `reload`, `stop`, `delete`, `logs --nostream`
 - `/usr/local/lib/nginx-conf/nginx-conf-helper` nur mit festen Subcommands
   wie `write-config`, `reset-config-to-head`, `commit-config`,
-  `activate-config`, `deactivate-config` und `clone-project`
+  `activate-config`, `deactivate-config`, `clone-project` und `certbot-issue`
 
 Der sudoers-Ausschnitt darf daraus keine Shell und keine Wildcards bauen. Die
 App selbst laeuft als unprivilegierter User `nginx-config`; sudo wird nur fuer
@@ -151,10 +151,20 @@ fuer den Helper laufen als JSON ueber stdin und werden gegen `action_id`,
 Projekt, gespeicherte Auswahl und erwartete Datei validiert.
 Der Repo-Wrapper `scripts/nginx-conf-helper` ist dafuer das installierbare
 CLI-Artefakt und soll im Betrieb root-owned an den obigen Helper-Pfad kopiert
-werden.
-Konkrete Installationsartefakte liegen in `deploy/nginx-conf.service` und
-`deploy/nginx-conf.sudoers`; die Installationsschritte stehen in
+werden. Der installierte Wrapper verwendet den festen Interpreter
+`/opt/nginx-conf/.venv/bin/python -I` und den festen Quellpfad
+`/opt/nginx-conf/src`. Der App-Runner stellt nur den explizit privilegierten
+Kommandos `sudo -n` voran. Zertifikatsausstellung laeuft ueber das feste
+Helper-Subcommand `certbot-issue`; dessen JSON-Request und gespeicherte Aktion
+muessen dieselben Domains und dieselbe aktive Projekt-Config enthalten.
+Konkrete Installationsartefakte liegen in `deploy/nginx-conf.service`,
+`deploy/nginx-conf.nginx` und `deploy/nginx-conf.sudoers`; die Installationsschritte stehen in
 `docs/deployment.md`.
+Die Unit behaelt `ProtectSystem=strict` und `ProtectHome=true`, erlaubt aber
+gezielte beschreibbare Betriebs-Mounts fuer den sudo-Helper. Dateirechte
+schuetzen root-eigenen Code und Configs weiterhin vor direkten App-Zugriffen.
+`NoNewPrivileges=false` erlaubt die durch sudoers begrenzte Rechteerhoehung;
+`PrivateTmp=false` haelt Gunicorn-Sockets fuer Host-Nginx sichtbar.
 Fuer Schreibzugriffe in `/opt/www` und lokale Git-Commits ist der bevorzugte
 Weg eine root-eigene Helper-CLI mit festen Subcommands, z.B. `write-config`,
 `reset-config-to-head` und `commit-config`. Sie wird nur bei Bedarf per `sudo`
@@ -630,7 +640,12 @@ Erlaubte PM2-Kommandos:
 - `pm2 stop <name>`
 - `pm2 delete <name>`
 - `pm2 logs <name> --lines 100 --nostream`
-- `pm2 save`
+- `pm2 save --force`
+
+Erfolgreiche PM2-Schreibaktionen speichern anschliessend die Prozessliste.
+Ein Speicherfehler wird als Fehler gemeldet. Fuer den Wiederanlauf wird der
+PM2-Systemdienst vor der Verwaltungs-App unter demselben Nutzer und mit
+`PM2_HOME=/opt/nginx-config/.pm2` eingerichtet.
 
 Projektordner muessen unter `/opt/www` liegen. `reload` soll nur angeboten
 werden, wenn es fuer den Prozess sinnvoll ist; sonst `restart`. Freie
@@ -679,9 +694,8 @@ sie mit klarem Blocker.
 
 ## Auth und Netzwerkbegrenzung
 
-Ziel-Origin fuer die Verwaltungs-App ist `config.mamasystems.de`. Diese Domain
-kann auf einem separaten System laufen, bevor `mamasystems.de` und die
-gehosteten Anwendungen migriert werden.
+Ziel-Origin fuer die Verwaltungs-App auf pepperz ist `config.pepperz.de`.
+Das erste verwaltete Projekt vorspiel-abrechnung nutzt `va.pepperz.de`.
 
 Passkeys muessen auf der spaeter genutzten WebAuthn-Origin registriert werden.
 Ein lokal fuer `localhost` registrierter Passkey funktioniert nicht automatisch
@@ -689,13 +703,13 @@ auf der Server-Domain. Eine SQLite-Datenbank mit lokal registriertem
 `localhost`-Passkey auf den Server zu kopieren ist daher kein belastbarer
 Bootstrap-Weg.
 
-Empfohlener Bootstrap:
+Bootstrap fuer pepperz:
 
 1. App auf dem Server starten
-2. ueber `config.mamasystems.de` zugreifen
-3. Setup-Token aus Server-Log oder root-lesbarer Datei holen
-4. Passkey fuer genau diese Adresse registrieren
-5. Setup-Token invalidieren
+2. Initial-Setup ueber einen SSH-Tunnel zu Loopback oeffnen
+3. Setup-Token aus der serverseitigen Datei lesen und Setup abschliessen
+4. einmaligen Login-Token per SSH erzeugen
+5. ueber HTTPS auf `config.pepperz.de/login` anmelden
 
 MVP-Implementierung: Solange kein Nutzer existiert, ist nur der Setup-Pfad
 offen. Die App erzeugt ein einmaliges Setup-Token und schreibt es serverseitig
@@ -704,13 +718,17 @@ unterhalb der SQLite-Datenablage in eine Datei `setup-token` mit Dateimodus
 ein erster Nutzer angelegt, das Token geloescht, die angegebenen oeffentlichen
 Server-IP-Adressen fuer DNS-Preflight in SQLite gespeichert und ein
 HttpOnly-Session-Cookie gesetzt. Danach brauchen alle Verwaltungsrouten eine
-gueltige Session. WebAuthn/Passkey-Registrierung bleibt ein separater Ausbau
+gueltige Session. Ein erneuter Login ist mit einem per SSH erzeugten,
+zehn Minuten gueltigen Einmal-Token moeglich. Der Token wird nur gehasht
+gespeichert, bei Nutzung atomar verbraucht und bei Neuausstellung ersetzt.
+HTTPS-Session-Cookies sind Secure, HttpOnly und SameSite=Lax. Ein Logout
+invalidiert die serverseitige Session. WebAuthn/Passkey-Registrierung bleibt ein separater Ausbau
 auf der echten Origin.
 
 Passkey/WebAuthn ist zusaetzliche Authentifizierung, aber kein Ersatz fuer
 Netzwerkbegrenzung und minimale Systemrechte.
 
-Bevorzugte Netzwerkbegrenzung fuer `config.mamasystems.de` ist eine oeffentliche
+Bevorzugte Netzwerkbegrenzung fuer `config.pepperz.de` ist eine oeffentliche
 DNS-Domain mit strikter IP-Allowlist. Tailscale oder VPN bleiben Alternativen.
 
 Allowlist-Kontext:

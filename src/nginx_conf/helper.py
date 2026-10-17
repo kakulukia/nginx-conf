@@ -7,8 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from nginx_conf.configs import parse_server_blocks
 from nginx_conf.github_clone import GitHubClonePlan, GitHubCloneValidationError, plan_github_clone
 from nginx_conf.store import AppDatabase, default_database_path
+from nginx_conf.system_actions import certbot_issue_command
 
 PROJECT_ROOT = Path("/opt/www")
 ENABLED_ROOT = Path("/etc/nginx/sites-enabled")
@@ -19,6 +21,7 @@ ALLOWED_SUBCOMMANDS = {
     "deactivate-config",
     "reset-config-to-head",
     "write-config",
+    "certbot-issue",
 }
 FORBIDDEN_REQUEST_KEYS = {"tempfile_path", "tmp_path", "before_hash", "after_hash", "full_diff", "git_diff"}
 
@@ -82,6 +85,8 @@ def handle_helper_request(
             return 0, _activate_config(request)
         if subcommand == "deactivate-config":
             return 0, _deactivate_config(request)
+        if subcommand == "certbot-issue":
+            return _issue_certificate(request, context)
         raise HelperRequestError(f"Unsupported helper subcommand: {subcommand}")
     except HelperRequestError as error:
         return 1, _error_response(action_id, subcommand, str(error))
@@ -274,6 +279,36 @@ def _clone_project(request: ValidatedCloneRequest) -> dict[str, Any]:
         "error": None,
         "target_project": request.plan.target_project,
         "target_path": str(request.plan.target_path),
+    }
+
+
+def _issue_certificate(request: ValidatedRequest, context: HelperContext) -> tuple[int, dict[str, Any]]:
+    domains = request.payload.get("domains")
+    if not isinstance(domains, list) or not domains or not all(isinstance(domain, str) for domain in domains):
+        raise HelperRequestError("Certificate domains must be a non-empty string list")
+    action = context.db.get_action(request.action_id)
+    if action.action_type != "certbot-issue" or action.parameters.get("domains") != domains:
+        raise HelperRequestError("Certificate domains do not match action_id")
+    matching_blocks = [
+        block for block in parse_server_blocks(request.expected_file) if block.server_names == tuple(domains)
+    ]
+    if len(matching_blocks) != 1:
+        raise HelperRequestError("Certificate domains must match exactly one selected server block")
+    enabled = _validate_enabled_root(context.enabled_root)
+    if not any(link.is_symlink() and link.resolve() == request.expected_file for link in enabled.iterdir()):
+        raise HelperRequestError("Certificate config must be active")
+    command = certbot_issue_command(domains)
+    # Leave time to clean up Certbot before the caller times out.
+    result = subprocess.run(
+        command.argv, capture_output=True, text=True, check=False, shell=False, timeout=command.timeout_seconds - 30
+    )
+    return result.returncode, {
+        "action_id": request.action_id,
+        "subcommand": request.subcommand,
+        "ok": result.returncode == 0,
+        "exit_code": result.returncode,
+        "stdout": result.stdout[-4000:],
+        "stderr": result.stderr[-4000:],
     }
 
 
