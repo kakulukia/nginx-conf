@@ -1,3 +1,4 @@
+{% from "_otp.html" import otp %}
 <!doctype html>
 <html lang="de">
   <head>
@@ -65,6 +66,33 @@
     }
 }</textarea>
           <p class="nc-text nc-text--small" id="config-example-hint">Bearbeitbares Beispiel ohne Speichern und ohne Serveraktion.</p>
+        </div>
+      </section>
+
+      <section class="sg-section" id="totp">
+        <h2 class="nc-heading">TOTP-Code</h2>
+        <p class="nc-text">Sechs Ziffern, sechs eckige Stellen. Tippen oder den vollständigen Code einfügen. Ein Eingabefeld, ein Tab-Stopp.</p>
+        <div class="sg-pair sg-otp">
+          <div class="sg-specimen">
+            <div class="nc-form">
+              <label class="nc-label" for="totp-empty">TOTP-Code, leer</label>
+              {{ otp('totp-empty', describedby='totp-hint') }}
+              <p class="nc-text nc-text--small" id="totp-hint">Sechsstelligen Code aus deiner Authenticator-App eingeben.</p>
+              <label class="nc-label" for="totp-partial">TOTP-Code, teilweise ausgefüllt</label>
+              {{ otp('totp-partial', value='482') }}
+              <label class="nc-label" for="totp-filled">TOTP-Code, vollständig</label>
+              {{ otp('totp-filled', value='482173') }}
+            </div>
+          </div>
+          <div class="sg-specimen">
+            <div class="nc-form">
+              <label class="nc-label" for="totp-invalid">TOTP-Code mit Fehler</label>
+              {{ otp('totp-invalid', value='482173', invalid=true, describedby='totp-error') }}
+              <p class="nc-error" id="totp-error">Der Code ist ungültig. Bitte den aktuellen Code eingeben.</p>
+              <label class="nc-label" for="totp-disabled">TOTP-Code, nicht verfügbar</label>
+              {{ otp('totp-disabled', value='482173', disabled=true) }}
+            </div>
+          </div>
         </div>
       </section>
 
@@ -324,7 +352,7 @@ nginx: configuration file /etc/nginx/nginx.conf test failed</code></pre></div>
         <div class="nc-list">
           <div class="nc-row nc-copy-row"><span><span class="nc-row__sub">Domain</span><code id="copy-domain">va.pepperz.de</code></span><button class="nc-button" type="button" data-copy-target="copy-domain" data-copy-label="Domain" aria-label="Domain kopieren">Kopieren</button></div>
           <div class="nc-row nc-copy-row"><span><span class="nc-row__sub">Pfad</span><code id="copy-path">/opt/www/vorspiel-abrechnung/.nginx/va.pepperz.de.conf</code></span><button class="nc-button" type="button" data-copy-target="copy-path" data-copy-label="Pfad" aria-label="Pfad kopieren">Kopieren</button></div>
-          <div class="nc-row nc-copy-row"><span><span class="nc-row__sub">SSH-Befehl für einen Login-Token</span><code id="copy-command">sudo -u nginx-config /opt/nginx-conf/.venv/bin/python -I /opt/nginx-conf/scripts/nginx-conf-login-token andy</code></span><button class="nc-button" type="button" data-copy-target="copy-command" data-copy-label="SSH-Befehl" aria-label="SSH-Befehl kopieren">Kopieren</button></div>
+          <div class="nc-row nc-copy-row"><span><span class="nc-row__sub">Einmalige Einrichtung bei der Installation</span><code id="copy-command">sudo -u nginx-config /opt/nginx-conf/.venv/bin/python -I /opt/nginx-conf/scripts/nginx-conf-auth</code></span><button class="nc-button" type="button" data-copy-target="copy-command" data-copy-label="SSH-Befehl" aria-label="SSH-Befehl kopieren">Kopieren</button></div>
         </div>
         <p class="nc-text nc-text--small" id="copy-feedback" role="status">Die Kopieraktionen schreiben den jeweiligen Beispielwert in die Zwischenablage.</p>
       </section>
@@ -356,6 +384,7 @@ nginx: configuration file /etc/nginx/nginx.conf test failed</code></pre></div>
         </div>
       </section>
     </main>
+    <script src="{{ url_for('static', path='otp.js') }}" defer></script>
     <script>
       // Enhance native datalists locally; no requests or saved values.
       document.querySelectorAll('.nc-autocomplete').forEach(container => {

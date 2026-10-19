@@ -1,0 +1,124 @@
+@use "components"
+
+.nc-page
+  padding: 32px
+.app-shell
+  max-width: 1120px
+  margin: 0 auto
+.app-header
+  display: flex
+  align-items: center
+  justify-content: space-between
+  gap: 32px
+  padding: 8px 0 24px
+.app-brand
+  display: inline-flex
+  align-items: center
+  gap: 12px
+  color: var(--nc-fg)
+  font-weight: 700
+.app-main
+  display: grid
+  grid-template-columns: minmax(0, 1fr)
+  gap: 32px
+  padding: 32px 0 64px
+  min-width: 0
+.app-title
+  display: grid
+  gap: 16px
+.app-section
+  display: grid
+  grid-template-columns: minmax(0, 1fr)
+  gap: 20px
+  min-width: 0
+  padding-top: 32px
+  border-top: 1px solid var(--nc-line)
+  > form:not(.app-inline-form):not(.nc-form)
+    display: flex
+    justify-content: flex-end
+.app-actions
+  display: flex
+  justify-content: flex-end
+  align-items: center
+  flex-wrap: wrap
+  gap: 12px
+  form
+    display: flex
+    align-items: center
+    gap: 12px
+.app-inline-form
+  display: grid
+  grid-template-columns: minmax(0, 1fr) auto
+  align-items: end
+  gap: 24px
+  max-width: 720px
+.app-field
+  display: grid
+  gap: 8px
+  min-width: 0
+.app-meta
+  margin-top: 8px
+  overflow-wrap: anywhere
+.app-config-list
+  margin: 0
+  padding: 0
+  list-style: none
+.app-config
+  padding: 24px 0
+  border-block: 1px solid var(--nc-line)
+  & + &
+    border-top: 0
+  > form
+    display: flex
+    justify-content: flex-end
+.app-config__header
+  display: flex
+  align-items: center
+  gap: 24px
+  > a
+    font-weight: 700
+  > form
+    margin-left: auto
+.app-editor .nc-textarea
+  min-height: 448px
+.app-main .nc-code
+  max-height: 480px
+.app-main > p, .app-section > p
+  margin: 0
+.app-actions .app-commit-form
+  flex: 1
+  align-items: end
+  .app-field
+    flex: 1
+.app-diff-summary
+  padding-bottom: 12px
+.app-log-filter
+  grid-template-columns: 120px auto
+  justify-content: start
+.app-auth
+  display: flex
+  align-items: center
+  min-height: 100dvh
+  .app-shell
+    width: 100%
+  .app-main
+    max-width: 640px
+    margin: 0 auto
+    padding: 0
+    gap: 24px
+  .nc-form
+    margin-top: 8px
+  .app-actions
+    margin-top: 24px
+.app-auth__qr
+  width: 224px
+  max-width: 100%
+  background: #fff
+  svg
+    display: block
+    width: 100%
+    height: auto
+.app-auth__secret
+  display: block
+  margin-top: 16px
+  overflow-wrap: anywhere

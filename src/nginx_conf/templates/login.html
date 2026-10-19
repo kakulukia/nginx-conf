@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "_otp.html" import otp %}
+{% block page_class %}app-auth{% endblock %}
+{% block header %}{% endblock %}
+{% block content %}
+  <div class="app-title">
+    <h1 class="nc-display">Anmelden</h1>
+    <p class="nc-text">{% if totp_configured %}Passwort und aktuellen Code aus deiner Authenticator-App eingeben.{% else %}Mit deinem Passwort anmelden. Anschließend richtest du deinen Authenticator ein.{% endif %}</p>
+  </div>
+  {% if not configured %}
+    <p class="nc-hint">Der Zugang ist noch nicht eingerichtet. Passwort einmalig bei der Installation festlegen.</p>
+  {% endif %}
+  <form class="nc-form" action="/api/login" method="post">
+    <label class="app-field" for="password"><span class="nc-label">Passwort</span>
+      <input class="nc-input" id="password" name="password" type="password" autocomplete="current-password" maxlength="1024" required{% if not configured %} disabled{% endif %}{% if error %} aria-describedby="login-error" aria-invalid="true"{% endif %}>
+    </label>
+    {% if totp_configured %}<div class="app-field">
+      <label class="nc-label" for="totp-code">TOTP-Code</label>
+      {{ otp('totp-code', name='totp_code', required=true, disabled=not configured, invalid=error, describedby='login-error' if error else '') }}
+    </div>{% endif %}
+    {% if error %}<p class="nc-error" id="login-error" role="alert">{{ error }}</p>{% endif %}
+    <div class="app-actions"><button class="nc-button nc-button--save" type="submit"{% if not configured %} disabled{% endif %}>Anmelden</button></div>
+  </form>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='otp.js') }}" defer></script>{% endblock %}

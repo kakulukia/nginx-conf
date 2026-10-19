@@ -19,8 +19,35 @@ Eingabefelder verwenden ausschließlich eine Unterlinie, keinen umlaufenden
 Rahmen. Die Referenz zeigt leere, befüllte, ungültige und deaktivierte Felder.
 Der Tastaturfokus bleibt sichtbar.
 
-Der aktuelle Auftrag betrifft den Styleguide. Setup, Anmeldung und andere
-vorhandene App-Seiten werden erst nach Abnahme darauf umgestellt.
+Anmeldung, Projektübersicht, Config-Editor und Logs verwenden dieselben
+Komponenten wie die Referenz. Das gemeinsame Seitenlayout liegt in `base.html`,
+das App-Layout in `app.sass`. Beide Sass-Einstiegspunkte laden `_components.sass`.
+Die reguläre Anmeldung enthält Passwort und TOTP-Code. Beim ersten Login
+folgt nach der Passwortprüfung die Authenticator-Einrichtung mit QR-Code,
+optionalem manuellen Schlüssel und Code-Bestätigung. Beide Ansichten sind
+ohne Kopfzeile vertikal zentriert. Fehlversuche werden rot angezeigt;
+die Eingaben bleiben nach dem Absenden leer.
+Nutzername, Setup- und Login-Token entfallen.
+
+Login, Authenticator-Einrichtung und Styleguide teilen denselben TOTP-Baustein.
+Sechs sichtbare Stellen mit jeweils 44 × 48 px und 8 px Abstand liegen hinter einem nativen
+Eingabefeld. Die Ziffern sind 24 px groß, die Beschriftung bleibt 10 px.
+Unterlinien und eckige Fokusflächen folgen den übrigen Eingaben. Leere Stellen
+haben keinen Platzhalter. Fehler färben die Unterlinien und den Hinweis rot;
+deaktivierte Ziffern sind dunkelgrau, ihre Unterlinien gestrichelt.
+
+Der Code bleibt ein zusammenhängender Wert mit einem Tab-Stopp. Ein Klick auf
+eine befüllte Stelle setzt die Einfügeposition hinter deren Ziffer, damit
+Backspace genau diese Ziffer löscht. Die stärkere Hintergrundfläche markiert
+die Stelle vor der Einfügeposition und bleibt auch an der sechsten Stelle
+sichtbar. Der Strichcursor wird bei aktiver JavaScript-Erweiterung ausgeblendet.
+Textauswahl, Pfeiltasten und Löschen behalten ihr natives Verhalten; eine
+Auswahl hebt die betroffenen Stellen gemeinsam hervor. Die Beispiele
+akzeptieren sechs ASCII-Ziffern, erhalten führende Nullen und bereinigen beim
+Einfügen beispielsweise `012 345` zu `012345`. `autocomplete="one-time-code"`
+erlaubt die Code-Übernahme durch den Browser. Das Feld übermittelt genau einen
+Wert namens `totp_code`; die sechs sichtbaren Stellen sind dekorativ.
+In beiden Anmeldeformularen ist ein vollständiger Code erforderlich.
 
 ## Farben aus der Shell
 
@@ -60,7 +87,6 @@ Unterlinie in Aktionsblau und eine dezent gefärbte Fläche bei Fokus, ohne
 Innenabstand, auch bei Dropdowns und Autocomplete. Ohne Fokus bleiben die
 Texte bündig zum Fließtext. Innenabstand, Fokusfläche und Linienfarbe wechseln
 mit einer 180 ms langen Animation. Bei reduzierter Bewegung entfällt sie.
-Die animierte Variante steht zur visuellen Abnahme.
 Bei ungültigen Eingaben bleibt die Unterlinie rot.
 Andere Bedienelemente behalten für die Tastaturbedienung den dünnen,
 gedämpften Fokusrahmen.
@@ -143,7 +169,7 @@ Normale Links nutzen Warnungsgelb (`#F0C674`) und werden beim Darüberfahren
 unterstrichen. Die gelbe Farbe bleibt dabei erhalten.
 Ein Kettensymbol zeigt einen Direktlink mit zugänglicher Beschriftung und
 32 px Klickfläche. Beide Linkformen nutzen den dezenten Tastaturfokus.
-Domain, Pfad und SSH-Befehl lassen sich kopieren; Erfolg und Fehler werden
+Domain, Pfad und der einmalige Installationsbefehl lassen sich kopieren; Erfolg und Fehler werden
 als Text zurückgemeldet. Der Befehl wird dabei ausschließlich kopiert.
 
 Der Bestätigungsdialog nutzt das native `dialog`-Element. Er nennt genau die
@@ -158,7 +184,7 @@ Styleguide ändert ausschließlich die lokale Rückmeldung, keine Config-Datei.
 Das Favicon verwendet die gewählten geschweiften Klammern in Aktionsblau
 (`#82A2BE`), mit transparentem Hintergrund und 2,5 px Strichstärke im
 24-Punkte-Raster. Es ist als SVG auf allen Seiten eingebunden, einschließlich
-Anmeldung und Setup. Die Datei wird lokal und ohne Anmeldung ausgeliefert.
+Anmeldung. Die Datei wird lokal und ohne Anmeldung ausgeliefert.
 
 ## Herkunft und Dateien
 
@@ -178,17 +204,22 @@ Die ISC-Lizenz ist direkt in `src/nginx_conf/static/favicon.svg` enthalten.
 - `src/nginx_conf/styles/_tokens.sass`: Farbrollen und Schrift.
 - `src/nginx_conf/styles/_components.sass`: allgemeine Bausteine.
 - `src/nginx_conf/styles/styleguide.sass`: Layout der Referenz.
+- `src/nginx_conf/styles/app.sass`: Layout der App und Anmeldung.
+- `src/nginx_conf/static/app.css`: kompilierte App-CSS-Datei.
 - `src/nginx_conf/static/styleguide.css`: kompilierte CSS-Datei.
 - `src/nginx_conf/static/fonts/`: lokal ausgelieferte Schrift und Lizenz.
 - `src/nginx_conf/templates/styleguide.html`: Beispiele ohne Serveraktionen.
+- `src/nginx_conf/templates/_otp.html`: wiederverwendbarer TOTP-Baustein.
+- `src/nginx_conf/static/otp.js`: gemeinsame Zifferneingabe und Positionsanzeige.
 
 Nach Sass-Änderungen mit dem lokal installierten Dart Sass kompilieren:
 
 ```bash
 sass --no-source-map --style=compressed src/nginx_conf/styles/styleguide.sass src/nginx_conf/static/styleguide.css
+sass --no-source-map --style=compressed src/nginx_conf/styles/app.sass src/nginx_conf/static/app.css
 ```
 
 Quellen und erzeugte CSS-Datei gemeinsam prüfen und versionieren.
 Zur Laufzeit wird kein Sass benötigt. Öffentlich abrufbar sind ausschließlich
-das Favicon, die CSS-Datei und die beiden Schriftdateien. Die Referenzseite
+das Favicon, beide CSS-Dateien, die TOTP-JavaScript-Datei und die beiden Schriftdateien. Die Referenzseite
 bleibt geschützt.

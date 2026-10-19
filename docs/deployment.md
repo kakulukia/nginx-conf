@@ -8,12 +8,12 @@ Nginx und die Verwaltungs-App laufen als Systemdienste, Webapps unter PM2.
 
 ## Pakete und Programmcode
 
-Benoetigt werden Git, Nginx, sudo, Certbot samt Nginx-Plugin, Python ab 3.13,
-uv und Node.js samt npm. Vorspiel-Abrechnung benoetigt mindestens Python
-3.14.6; das auf pepperz vorhandene Python 3.14.4 reicht dafuer nicht.
-Fuer die Admin-App reicht System-Python. Fuer Vorspiel einen passenden
-Interpreter mit `UV_PYTHON_INSTALL_DIR=/opt/python uv python install 3.14`
-als root installieren und dessen Pfad beim Projekt-`uv sync` angeben.
+Benoetigt werden Git, Nginx, sudo, Certbot samt Nginx-Plugin, Python ab 3.15,
+uv und Node.js samt npm. Die Admin-App verwendet Python 3.15. Das bisher
+auf pepperz vorhandene System-Python 3.14.4 reicht dafür nicht. Einen passenden
+Interpreter als root unter `/opt/python` installieren und dieses Verzeichnis
+auch beim `uv sync` angeben. Vorspiel-Abrechnung benötigt mindestens Python
+3.14.6; dessen eigene Laufzeit und Abhängigkeiten separat prüfen.
 Die Installation samt Elternverzeichnissen muss fuer den App-Nutzer lesbar
 und ausfuehrbar sein.
 uv wird aus der offiziellen Distribution nach `/usr/local/bin` installiert.
@@ -36,7 +36,8 @@ Private Repositories brauchen einen separat eingerichteten Deploy-Key.
 
 ```bash
 cd /opt/nginx-conf
-sudo /usr/local/bin/uv sync --locked --no-dev --python /usr/bin/python3
+sudo env UV_PYTHON_INSTALL_DIR=/opt/python /usr/local/bin/uv python install 3.15
+sudo env UV_PYTHON_INSTALL_DIR=/opt/python /usr/local/bin/uv sync --locked --no-dev --python 3.15
 sudo chown -R root:root /opt/nginx-conf
 sudo chmod -R go-w /opt/nginx-conf
 sudo useradd --system --home /opt/nginx-config --shell /usr/sbin/nologin nginx-config
@@ -48,7 +49,8 @@ sudo install -d -o root -g root -m 0711 /run/sudo
 Der App-Systemuser bekommt keine breiten Schreibrechte auf `/opt/www`.
 Das Virtualenv muss einen fuer ihn ausfuehrbaren Interpreter verwenden.
 Ein Python unter `/root` oder einem Home-Verzeichnis passt wegen
-`ProtectHome=true` nicht zum Service; System-Python verwenden.
+`ProtectHome=true` nicht zum Service. Den root-eigenen Interpreter unter
+`/opt/python` verwenden und dessen Les- und Ausführungsrechte prüfen.
 
 ## Helper und sudoers
 
@@ -122,34 +124,47 @@ verhindern weiterhin direkte Config-/Code-Aenderungen durch den App-Nutzer.
 Rechteerhoehung. `PrivateTmp=false` macht Gunicorn-Sockets unter `/tmp`
 fuer den Host-Nginx sichtbar.
 
-## Initial-Setup und erneute Anmeldung
+## Passwort und TOTP
 
-Initial-Setup bleibt auf lokale oder private Quelladressen begrenzt.
-Ein oeffentlicher Browserzugriff wird trotz Nginx-Allowlist abgelehnt.
-Fuer den Bootstrap einen SSH-Tunnel verwenden:
-
-```bash
-ssh -N -L 18080:127.0.0.1:8080 andy@81.169.200.21
-```
-
-`http://127.0.0.1:18080/setup` im Browser oeffnen. Erst dieser Aufruf erzeugt
-`/opt/nginx-config/setup-token`, Modus `0600`. Das Token separat per SSH lesen,
-im Formular eingeben und Nutzername sowie oeffentliche Server-IP-Adressen
-eintragen. Das Setup invalidiert das Token. Die Datenbank bleibt auf dem
-Server. Die Tunnel-Session gilt nicht automatisch fuer die Admin-Domain.
-
-Fuer `https://config.pepperz.de/login` oder nach Ablauf einer Session
-einen neuen Token per SSH erzeugen:
+Die Anwendung hat genau einen Zugang ohne Nutzernamen. Ein Web-Setup und
+Login-Tokens entfallen. Bei der Installation einmalig im Terminal ausführen:
 
 ```bash
-sudo -u nginx-config /opt/nginx-conf/.venv/bin/python -I /opt/nginx-conf/scripts/nginx-conf-login-token admin
+sudo -u nginx-config /opt/nginx-conf/.venv/bin/python -I /opt/nginx-conf/scripts/nginx-conf-auth
 ```
 
-`admin` durch den beim Setup gewaehlten Nutzernamen ersetzen. Der Token ist
-zehn Minuten gueltig, nur einmal verwendbar und ersetzt vorherige unbenutzte
-Login-Tokens. SQLite speichert nur seinen Hash. HTTPS-Sessions haben Secure-,
-HttpOnly- und SameSite-Lax-Cookies und laufen nach 30 Tagen ab.
-Passkeys sind ein spaeterer Ausbau auf der echten Origin.
+Der Befehl fragt ausschließlich das Passwort zweimal verdeckt ab und speichert
+es als Argon2id-Hash. Das Passwort hat mindestens 12 Zeichen. Keine Passwörter
+oder TOTP-Geheimnisse als Kommandozeilenargumente übergeben.
+
+Anschließend `https://config.pepperz.de/login` öffnen und das Passwort eingeben.
+Beim ersten Login erscheint der QR-Code für die Authenticator-App. Scannen
+oder den Schlüssel manuell eintragen und den aktuellen Code bestätigen.
+Erst danach ist die App zugänglich. Die Einrichtung läuft nach zehn Minuten
+ab; dann erneut mit dem Passwort beginnen. QR-Code und Schlüssel werden
+vollständig auf dem Server erzeugt und nicht an einen QR-Dienst übertragen.
+Bei späteren Anmeldungen Passwort und aktuellen TOTP-Code eingeben.
+
+Die SQLite-Datei enthält den Passwort-Hash und das TOTP-Geheimnis und erhält
+Modus `0600`. Auch Backups dieser Datei entsprechend schützen. Die Dateien
+bleiben auf dem Server. Die Systemzeit muss synchronisiert sein.
+
+Fünf Anmeldeversuche ohne erfolgreichen Login sperren weitere Versuche für
+60 Sekunden. Die Sperre bleibt bei einem Prozessneustart erhalten. Ein
+TOTP-Code ist nur einmal nutzbar. HTTPS-Sessions haben Secure-, HttpOnly- und
+SameSite-Lax-Cookies und laufen nach 30 Tagen ab. Abmelden invalidiert die Session.
+
+Bei verlorenem Passwort oder Authenticator den gleichen Installationsbefehl
+mit `--replace` ausführen. Das setzt ein neues Passwort, entfernt den bisherigen Authenticator und meldet
+alle bestehenden Sessions ab. Auch laufende Einrichtungen werden ungültig.
+Beim nächsten Login den Authenticator erneut im Browser einrichten.
+Im Browser gibt es keinen Weg zum Zurücksetzen.
+
+Beim Update vom bisherigen Modell werden alte Nutzer, Token-Sessions und
+die Setup-Token-Datei entfernt. Projekte, Einstellungen, Audit-Daten und
+bereits gespeicherte Server-IPs bleiben erhalten. Neue Server-IPs sollen
+später über einen eigenen Dialog gepflegt werden. Ohne konfigurierte IPs
+bleiben DNS-Preflight und davon abhängige Zertifikatsaktionen blockiert.
 
 ## Erstes Projekt: vorspiel-abrechnung
 
@@ -192,6 +207,6 @@ sudo nginx -t
 sudo certbot renew --dry-run --non-interactive
 ```
 
-Auf pepperz Setup, erneute Anmeldung, Config-Schreibzugriff, Nginx-Test/Reload,
+Auf pepperz Einrichtung, Passwort-/TOTP-Anmeldung, Config-Schreibzugriff, Nginx-Test/Reload,
 Prozessstart und Wiederanlauf nach Neustart pruefen. Ein lokaler Containercheck
 ersetzt diese Abnahme auf dem Zielserver nicht.

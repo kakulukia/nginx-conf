@@ -1,99 +1,121 @@
 from __future__ import annotations
 
 import hashlib
-import ipaddress
+import re
 import secrets
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
-from nginx_conf.store import AppDatabase, User
+import pyotp
+from argon2 import PasswordHasher, Type
+from argon2.exceptions import InvalidHashError, VerificationError
+
+from nginx_conf.store import AppDatabase
 
 SESSION_COOKIE_NAME = "nginx_conf_session"
-SETUP_STATE_KEY = "auth.setup_token"
-SETUP_TOKEN_FILENAME = "setup-token"
 SESSION_TTL_DAYS = 30
-LOGIN_STATE_KEY = "auth.login_token"
-LOGIN_TOKEN_TTL_MINUTES = 10
+ENROLLMENT_COOKIE_NAME = "nginx_conf_enrollment"
+ENROLLMENT_TTL_SECONDS = 600
+LOGIN_ATTEMPT_LIMIT = 5
+LOGIN_LOCK_SECONDS = 60
+PASSWORD_HASHER = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=1, type=Type.ID)
+LOGIN_ERROR = "Die Anmeldedaten sind ungültig."
 
 
 class AuthError(ValueError):
     pass
 
 
-@dataclass(frozen=True, slots=True)
-class SetupResult:
-    user: User
-    session_token: str
+@dataclass(frozen=True)
+class EnrollmentRequired:
+    token: str
 
 
-def ensure_setup_token(db: AppDatabase, *, token_path: Path) -> bool:
-    if db.count_users() > 0:
-        _remove_token_file(token_path)
-        db.delete_ui_state(SETUP_STATE_KEY)
-        return False
-    if db.get_ui_state(SETUP_STATE_KEY) is not None:
-        return False
+def configure_password(db: AppDatabase, *, password: str, replace: bool = False) -> None:
+    if not 12 <= len(password) <= 1024:
+        raise AuthError("Das Passwort muss zwischen 12 und 1024 Zeichen lang sein.")
+    db.save_auth_credentials(
+        password_hash=PASSWORD_HASHER.hash(password), totp_secret="", last_totp_step=-1, replace=replace
+    )
 
+
+def matching_totp_step(secret: str, code: str, *, now: int | None = None) -> int | None:
+    code = code.strip().replace(" ", "")
+    if re.fullmatch(r"[0-9]{6}", code) is None:
+        return None
+    step = int(time.time() if now is None else now) // 30
+    totp = pyotp.TOTP(secret)
+    for offset in (0, -1, 1):
+        candidate = step + offset
+        if candidate >= 0 and secrets.compare_digest(totp.at(candidate * 30), code):
+            return candidate
+    return None
+
+
+def login(db: AppDatabase, *, password: str, code: str, now: int | None = None) -> str | EnrollmentRequired:
+    now = int(time.time() if now is None else now)
+    credentials = db.reserve_login_attempt(now=now, limit=LOGIN_ATTEMPT_LIMIT, lock_seconds=LOGIN_LOCK_SECONDS)
+    if credentials is None or not password or len(password) > 1024:
+        raise AuthError(LOGIN_ERROR)
+    try:
+        PASSWORD_HASHER.verify(credentials.password_hash, password)
+    except (VerificationError, InvalidHashError) as error:
+        raise AuthError(LOGIN_ERROR) from error
+    if not credentials.totp_secret:
+        token = secrets.token_urlsafe(32)
+        if not db.create_enrollment(
+            token_hash=_hash_token(token),
+            password_hash=credentials.password_hash,
+            secret=pyotp.random_base32(),
+            expires_at=now + ENROLLMENT_TTL_SECONDS,
+            now=now,
+        ):
+            raise AuthError(LOGIN_ERROR)
+        return EnrollmentRequired(token)
+    step = matching_totp_step(credentials.totp_secret, code, now=now)
+    if step is None:
+        raise AuthError(LOGIN_ERROR)
     token = secrets.token_urlsafe(32)
-    db.set_ui_state(SETUP_STATE_KEY, {"token_hash": _hash_token(token), "created_at": _now()})
-    token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(token + "\n", encoding="utf-8")
-    token_path.chmod(0o600)
-    return True
-
-
-def complete_setup(
-    db: AppDatabase,
-    *,
-    setup_token: str,
-    username: str,
-    server_ips: list[str],
-    token_path: Path,
-) -> SetupResult:
-    if db.count_users() > 0:
-        raise AuthError("Setup ist bereits abgeschlossen")
-    state = db.get_ui_state(SETUP_STATE_KEY)
-    if not state or state.get("token_hash") != _hash_token(setup_token):
-        raise AuthError("Setup-Token ist ungueltig")
-
-    for address in server_ips:
-        if address:
-            db.upsert_server_ip(address, label="setup")
-    user = db.create_user(username)
-    db.delete_ui_state(SETUP_STATE_KEY)
-    _remove_token_file(token_path)
-    session_token = create_session(db, user)
-    return SetupResult(user=user, session_token=session_token)
-
-
-def create_session(db: AppDatabase, user: User) -> str:
-    session_token = secrets.token_urlsafe(32)
-    expires_at = (datetime.now(UTC) + timedelta(days=SESSION_TTL_DAYS)).isoformat(timespec="seconds")
-    db.create_session(user_id=user.id, session_hash=_hash_token(session_token), expires_at=expires_at)
-    return session_token
-
-
-def issue_login_token(db: AppDatabase, username: str) -> str:
-    user = db.get_user_by_username(username)
-    if user is None:
-        raise AuthError("Nutzer nicht gefunden. Zuerst Initial-Setup abschliessen.")
-    token = secrets.token_urlsafe(32)
-    expires_at = (datetime.now(UTC) + timedelta(minutes=LOGIN_TOKEN_TTL_MINUTES)).isoformat(timespec="seconds")
-    db.set_ui_state(LOGIN_STATE_KEY, {"token_hash": _hash_token(token), "user_id": user.id, "expires_at": expires_at})
+    expires_at = _session_expiry(now)
+    if not db.complete_login(credentials, totp_step=step, session_hash=_hash_token(token), expires_at=expires_at):
+        raise AuthError(LOGIN_ERROR)
     return token
 
 
-def login_with_token(db: AppDatabase, token: str) -> SetupResult:
-    state = db.get_ui_state(LOGIN_STATE_KEY)
-    if not state or not secrets.compare_digest(str(state.get("token_hash", "")), _hash_token(token)):
-        raise AuthError("Login-Token ist ungueltig oder abgelaufen.")
-    if state["expires_at"] <= _now():
-        raise AuthError("Login-Token ist ungueltig oder abgelaufen.")
-    user = db.get_user(state["user_id"])
-    if user is None or not db.consume_ui_state(LOGIN_STATE_KEY, state):
-        raise AuthError("Login-Token ist ungueltig oder bereits verwendet.")
-    return SetupResult(user=user, session_token=create_session(db, user))
+def enrollment_secret(db: AppDatabase, token: str | None, *, now: int | None = None) -> str | None:
+    if not token:
+        return None
+    return db.get_enrollment_secret(_hash_token(token), now=int(time.time() if now is None else now))
+
+
+def confirm_enrollment(db: AppDatabase, *, token: str | None, code: str, now: int | None = None) -> str:
+    now = int(time.time() if now is None else now)
+    secret = enrollment_secret(db, token, now=now)
+    if secret is None:
+        raise AuthError("Die Einrichtung ist abgelaufen. Bitte erneut mit deinem Passwort anmelden.")
+    db.reserve_login_attempt(now=now, limit=LOGIN_ATTEMPT_LIMIT, lock_seconds=LOGIN_LOCK_SECONDS)
+    step = matching_totp_step(secret, code, now=now)
+    if step is None:
+        raise AuthError("Der Code ist ungültig. Bitte den aktuellen Code aus deiner Authenticator-App eingeben.")
+    session = secrets.token_urlsafe(32)
+    if not db.complete_enrollment(
+        token_hash=_hash_token(token),
+        now=now,
+        totp_step=step,
+        session_hash=_hash_token(session),
+        expires_at=_session_expiry(now),
+    ):
+        raise AuthError("Die Einrichtung ist abgelaufen. Bitte erneut mit deinem Passwort anmelden.")
+    return session
+
+
+def _session_expiry(now: int) -> str:
+    return (datetime.fromtimestamp(now, UTC) + timedelta(days=SESSION_TTL_DAYS)).isoformat(timespec="seconds")
+
+
+def session_valid(db: AppDatabase, token: str | None) -> bool:
+    return bool(token and db.session_valid(_hash_token(token)))
 
 
 def logout(db: AppDatabase, token: str | None) -> None:
@@ -101,55 +123,34 @@ def logout(db: AppDatabase, token: str | None) -> None:
         db.delete_session(_hash_token(token))
 
 
-def login_token_cli() -> int:
+def configure_access_cli() -> int:
     import argparse
+    import getpass
+    import sys
+    from pathlib import Path
 
-    parser = argparse.ArgumentParser(description="Create a one-time nginx-conf login token over SSH")
-    parser.add_argument("username")
+    parser = argparse.ArgumentParser(description="Passwort für nginx-conf festlegen")
     parser.add_argument("--database", type=Path, default=AppDatabase().path)
+    parser.add_argument("--replace", action="store_true", help="Zugang ersetzen und alle Sessions abmelden")
     args = parser.parse_args()
-    if not args.database.is_file():
-        parser.exit(1, "Datenbank fehlt. Zuerst Initial-Setup abschliessen.\n")
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        parser.exit(1, "Die Einrichtung benötigt ein interaktives Terminal.\n")
+    db = AppDatabase(args.database)
+    db.initialize()
+    if db.get_auth_credentials() and not args.replace:
+        parser.exit(1, "Zugang bereits eingerichtet. Zum Ersetzen --replace verwenden.\n")
+    password = getpass.getpass("Passwort: ")
+    if not 12 <= len(password) <= 1024:
+        parser.exit(1, "Das Passwort muss zwischen 12 und 1024 Zeichen lang sein.\n")
+    if password != getpass.getpass("Passwort wiederholen: "):
+        parser.exit(1, "Die Passwörter stimmen nicht überein.\n")
     try:
-        token = issue_login_token(AppDatabase(args.database), args.username)
-    except (AuthError, OSError) as error:
+        configure_password(db, password=password, replace=args.replace)
+    except ValueError as error:
         parser.exit(1, f"{error}\n")
-    print(token)
+    print("Passwort gespeichert. Beim ersten Login im Browser den Authenticator einrichten.")
     return 0
-
-
-def user_for_session(db: AppDatabase, session_token: str | None) -> User | None:
-    if not session_token:
-        return None
-    return db.get_user_for_session(_hash_token(session_token))
-
-
-def setup_client_allowed(host: str | None) -> bool:
-    if host == "testclient":
-        return True
-    if not host:
-        return False
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    return not address.is_global
-
-
-def setup_token_path_for_database(db_path: Path) -> Path:
-    return db_path.parent / SETUP_TOKEN_FILENAME
 
 
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def _now() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
-
-
-def _remove_token_file(path: Path) -> None:
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass

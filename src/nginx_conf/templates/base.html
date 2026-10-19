@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/svg+xml" sizes="any" href="{{ url_for('static', path='favicon.svg') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}">
+    <title>{{ title }} · nginx-conf</title>
+  </head>
+  <body class="nc-page nc-theme-dark {% block page_class %}{% endblock %}">
+    <div class="app-shell">
+      {% block header %}<header class="app-header">
+        <a class="app-brand" href="/" aria-label="nginx-conf Startseite"><img src="{{ url_for('static', path='favicon.svg') }}" width="24" height="24" alt="">nginx-conf</a>
+        {% block account %}{% endblock %}
+      </header>{% endblock %}
+      {% block navigation %}{% endblock %}
+      <main class="app-main" id="inhalt">{% block content %}{% endblock %}</main>
+    </div>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

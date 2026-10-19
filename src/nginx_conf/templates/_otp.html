@@ -1,0 +1,6 @@
+{% macro otp(id, value='', disabled=false, invalid=false, describedby='', name='', required=false) %}
+<div class="nc-otp">
+  <input class="nc-otp__input" id="{{ id }}"{% if name %} name="{{ name }}"{% endif %} value="{{ value }}" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" spellcheck="false"{% if required %} required{% endif %}{% if disabled %} disabled{% endif %}{% if invalid %} aria-invalid="true"{% endif %}{% if describedby %} aria-describedby="{{ describedby }}"{% endif %}>
+  <span class="nc-otp__slots" aria-hidden="true">{% for digit in range(6) %}<span></span>{% endfor %}</span>
+</div>
+{% endmacro %}

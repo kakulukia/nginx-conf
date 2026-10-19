@@ -8,15 +8,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from nginx_conf.auth import (
+    ENROLLMENT_COOKIE_NAME,
+    ENROLLMENT_TTL_SECONDS,
     SESSION_COOKIE_NAME,
-    AuthError,
-    complete_setup,
-    ensure_setup_token,
-    login_with_token,
+    EnrollmentRequired,
+    confirm_enrollment,
+    enrollment_secret,
+    login,
     logout,
-    setup_client_allowed,
-    setup_token_path_for_database,
-    user_for_session,
+    session_valid,
 )
 from nginx_conf.certbot_renewal import (
     certbot_renewal_status_to_dict,
@@ -63,7 +63,7 @@ from nginx_conf.static_assets import (
     select_static_asset_candidate,
     static_asset_candidate_to_dict,
 )
-from nginx_conf.store import ActionLockError, AppDatabase, default_database_path
+from nginx_conf.store import ActionLockError, AppDatabase, LoginThrottledError, default_database_path
 from nginx_conf.system_actions import (
     CommandRunner,
     SystemActionService,
@@ -88,11 +88,13 @@ DATABASE_PATH = default_database_path()
 LETSENCRYPT_ROOT = Path("/etc/letsencrypt")
 PUBLIC_PATHS = {
     "/health",
-    "/setup",
-    "/api/setup",
     "/login",
     "/api/login",
+    "/login/authenticator",
+    "/api/login/authenticator",
+    "/static/app.css",
     "/static/styleguide.css",
+    "/static/otp.js",
     "/static/favicon.svg",
     "/static/fonts/source-code-pro-regular.woff2",
     "/static/fonts/source-code-pro-bold.woff2",
@@ -105,24 +107,15 @@ async def require_session(request: Request, call_next):
     if request.method == "POST" and origin and origin.rstrip("/") != str(request.base_url).rstrip("/"):
         return JSONResponse({"detail": "Origin not allowed"}, status_code=403)
     if request.url.path in PUBLIC_PATHS:
-        if request.url.path in {"/setup", "/api/setup"}:
-            db = get_database()
-            if db.count_users() == 0 and not setup_client_allowed(request.client.host if request.client else None):
-                return JSONResponse({"detail": "Setup access denied"}, status_code=403)
-        return await call_next(request)
-
-    db = get_database()
-    if db.count_users() == 0:
-        if request.url.path.startswith("/api/"):
-            return JSONResponse({"detail": "Setup required"}, status_code=403)
-        return RedirectResponse("/setup", status_code=303)
-
-    user = user_for_session(db, request.cookies.get(SESSION_COOKIE_NAME))
-    if user is None:
+        response = await call_next(request)
+        if request.url.path.startswith(("/login", "/api/login")):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Referrer-Policy"] = "same-origin"
+        return response
+    if not session_valid(get_database(), request.cookies.get(SESSION_COOKIE_NAME)):
         if request.url.path.startswith("/api/"):
             return JSONResponse({"detail": "Authentication required"}, status_code=401)
         return RedirectResponse("/login", status_code=303)
-    request.state.user = user
     return await call_next(request)
 
 
@@ -179,83 +172,112 @@ def find_choice_or_404(project_name: str, db: AppDatabase):
     return project, choices[0]
 
 
-@app.get("/setup", response_class=HTMLResponse)
-def setup_page(request: Request) -> Response:
-    db = get_database()
-    if db.count_users() > 0:
-        if user_for_session(db, request.cookies.get(SESSION_COOKIE_NAME)):
-            return RedirectResponse("/", status_code=303)
-        return RedirectResponse("/login", status_code=303)
-    token_path = setup_token_path_for_database(DATABASE_PATH)
-    ensure_setup_token(db, token_path=token_path)
-    return _auth_form(request, login_mode=False)
-
-
-@app.post("/api/setup")
-async def setup_api(request: Request) -> Response:
-    db = get_database()
-    try:
-        payload = await _request_payload(request)
-        result = complete_setup(
-            db,
-            setup_token=str(payload.get("setup_token") or ""),
-            username=str(payload.get("username") or ""),
-            server_ips=_server_ips_from_payload(payload.get("server_ips")),
-            token_path=setup_token_path_for_database(DATABASE_PATH),
-        )
-    except (AuthError, ValueError) as error:
-        if "application/json" not in request.headers.get("content-type", ""):
-            return _auth_form(request, login_mode=False, error=str(error))
-        return JSONResponse({"ok": False, "detail": str(error)}, status_code=400)
-
-    response = (
-        JSONResponse({"ok": True, "username": result.user.username})
-        if "application/json" in request.headers.get("content-type", "")
-        else RedirectResponse("/", status_code=303)
-    )
-    _set_session_cookie(response, result.session_token, secure=request.url.scheme == "https")
-    return response
-
-
-def _auth_form(request: Request, *, login_mode: bool, error: str | None = None) -> Response:
+def _login_form(request: Request, *, error: str | None = None, status_code: int = 200) -> Response:
+    credentials = get_database().get_auth_credentials()
     return templates.TemplateResponse(
         request,
-        "setup.html",
+        "login.html",
         {
-            "title": "Anmelden" if login_mode else "Initial-Setup",
-            "login_mode": login_mode,
-            "setup_token_path": setup_token_path_for_database(DATABASE_PATH),
+            "title": "Anmelden",
+            "configured": credentials is not None,
+            "totp_configured": bool(credentials and credentials.totp_secret),
             "error": error,
         },
-        status_code=400 if error else 200,
+        status_code=status_code,
     )
 
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request) -> Response:
-    db = get_database()
-    if db.count_users() == 0:
-        return RedirectResponse("/setup", status_code=303)
-    if user_for_session(db, request.cookies.get(SESSION_COOKIE_NAME)):
+    if session_valid(get_database(), request.cookies.get(SESSION_COOKIE_NAME)):
         return RedirectResponse("/", status_code=303)
-    return _auth_form(request, login_mode=True)
+    return _login_form(request)
 
 
 @app.post("/api/login")
 async def login_api(request: Request) -> Response:
     try:
         payload = await _request_payload(request)
-        result = login_with_token(get_database(), str(payload.get("login_token") or "").strip())
-    except (AuthError, ValueError) as error:
+        token = login(
+            get_database(), password=str(payload.get("password") or ""), code=str(payload.get("totp_code") or "")
+        )
+    except ValueError as error:
+        status = 429 if isinstance(error, LoginThrottledError) else 401
+        headers = {"Retry-After": str(error.retry_after)} if isinstance(error, LoginThrottledError) else {}
         if "application/json" not in request.headers.get("content-type", ""):
-            return _auth_form(request, login_mode=True, error=str(error))
-        return JSONResponse({"ok": False, "detail": str(error)}, status_code=400)
+            response = _login_form(request, error=str(error), status_code=status)
+            response.headers.update(headers)
+            return response
+        return JSONResponse({"ok": False, "detail": str(error)}, status_code=status, headers=headers)
+    if isinstance(token, EnrollmentRequired):
+        response = (
+            JSONResponse({"ok": True, "enrollment_required": True, "next": "/login/authenticator"})
+            if "application/json" in request.headers.get("content-type", "")
+            else RedirectResponse("/login/authenticator", status_code=303)
+        )
+        response.set_cookie(
+            ENROLLMENT_COOKIE_NAME,
+            token.token,
+            httponly=True,
+            secure=request.url.scheme == "https",
+            samesite="strict",
+            max_age=ENROLLMENT_TTL_SECONDS,
+            path="/",
+        )
+        return response
     response = (
         JSONResponse({"ok": True})
         if "application/json" in request.headers.get("content-type", "")
         else RedirectResponse("/", status_code=303)
     )
-    _set_session_cookie(response, result.session_token, secure=request.url.scheme == "https")
+    _set_session_cookie(response, token, secure=request.url.scheme == "https")
+    response.delete_cookie(ENROLLMENT_COOKIE_NAME)
+    return response
+
+
+def _enrollment_form(request: Request, *, error: str | None = None, status_code: int = 200) -> Response:
+    import pyotp
+    import qrcode
+    from qrcode.image.svg import SvgPathImage
+
+    secret = enrollment_secret(get_database(), request.cookies.get(ENROLLMENT_COOKIE_NAME))
+    if secret is None:
+        response = _login_form(
+            request, error="Die Einrichtung ist abgelaufen. Bitte erneut mit deinem Passwort anmelden.", status_code=401
+        )
+        response.delete_cookie(ENROLLMENT_COOKIE_NAME)
+        return response
+    uri = pyotp.TOTP(secret).provisioning_uri(name=request.url.hostname or "nginx-conf", issuer_name="nginx-conf")
+    qr = qrcode.make(uri, image_factory=SvgPathImage).to_string().decode("utf-8")
+    return templates.TemplateResponse(
+        request,
+        "enrollment.html",
+        {"title": "Authenticator einrichten", "secret": secret, "qr": qr, "error": error},
+        status_code=status_code,
+    )
+
+
+@app.get("/login/authenticator", response_class=HTMLResponse)
+def enrollment_page(request: Request) -> Response:
+    return _enrollment_form(request)
+
+
+@app.post("/api/login/authenticator")
+async def enrollment_api(request: Request) -> Response:
+    try:
+        payload = await _request_payload(request)
+        token = confirm_enrollment(
+            get_database(), token=request.cookies.get(ENROLLMENT_COOKIE_NAME), code=str(payload.get("totp_code") or "")
+        )
+    except ValueError as error:
+        status = 429 if isinstance(error, LoginThrottledError) else 401
+        response = _enrollment_form(request, error=str(error), status_code=status)
+        if isinstance(error, LoginThrottledError):
+            response.headers["Retry-After"] = str(error.retry_after)
+        return response
+    response = RedirectResponse("/", status_code=303)
+    _set_session_cookie(response, token, secure=request.url.scheme == "https")
+    response.delete_cookie(ENROLLMENT_COOKIE_NAME)
     return response
 
 
@@ -1189,17 +1211,6 @@ def _ssl_status_for_project(ssl_inventory, project_name: str):
         if project_ssl.project_name == project_name:
             return project_ssl
     return None
-
-
-def _server_ips_from_payload(value: object) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        normalized = value.replace(",", "\n")
-        return [line.strip() for line in normalized.splitlines() if line.strip()]
-    if isinstance(value, list) and all(isinstance(item, str) for item in value):
-        return [item for item in value if item]
-    raise ValueError("server_ips must be a string or string list")
 
 
 def _set_session_cookie(response: Response, session_token: str, *, secure: bool) -> None:

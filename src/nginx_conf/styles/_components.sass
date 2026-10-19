@@ -109,6 +109,54 @@ a
     color: var(--nc-fg2)
     border-color: var(--nc-line)
     border-bottom-style: dashed
+// One native input keeps paste, selection and keyboard navigation intact.
+.nc-otp
+  position: relative
+  width: 304px
+  height: 48px
+  overflow: clip
+.nc-otp__input
+  position: relative
+  z-index: 1
+  // Include trailing letter-spacing so entering six digits never scrolls the text.
+  width: calc(312px + (44px - 1ch) / 2)
+  height: 48px
+  padding: 0 0 0 calc((44px - 1ch) / 2)
+  border: 0
+  outline: none
+  background: transparent
+  color: var(--nc-fg)
+  font-size: 24px
+  line-height: 48px
+  letter-spacing: calc(52px - 1ch)
+  caret-color: var(--nc-accent)
+  &--enhanced
+    caret-color: transparent
+  &:focus-visible
+    outline: none
+  &:focus + .nc-otp__slots > span
+    background: var(--nc-focus-fill)
+    border-color: var(--nc-accent)
+    &[data-active]
+      background: var(--nc-focus-cell)
+  &[aria-invalid="true"] + .nc-otp__slots > span
+    border-color: var(--nc-error)
+  &:disabled
+    color: var(--nc-placeholder)
+    + .nc-otp__slots > span
+      border-color: var(--nc-line)
+      border-bottom-style: dashed
+.nc-otp__slots
+  position: absolute
+  inset: 0
+  display: grid
+  grid-template-columns: repeat(6, 44px)
+  gap: 8px
+  pointer-events: none
+  > span
+    border-bottom: 1px solid var(--nc-fg2)
+    transition: background-color 180ms ease, border-color 180ms ease
+
 select.nc-input, ::picker(select)
   appearance: base-select
 select.nc-input

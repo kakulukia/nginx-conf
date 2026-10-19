@@ -37,6 +37,12 @@ class PersistencePolicyError(ValueError):
     pass
 
 
+class LoginThrottledError(ValueError):
+    def __init__(self, retry_after: int) -> None:
+        super().__init__("Zu viele Anmeldeversuche. Bitte kurz warten.")
+        self.retry_after = retry_after
+
+
 @dataclass(frozen=True, slots=True)
 class AuditEntry:
     id: int
@@ -103,10 +109,9 @@ class ManagedPM2Process:
 
 
 @dataclass(frozen=True, slots=True)
-class User:
-    id: int
-    username: str
-    created_at: str
+class AuthCredentials:
+    password_hash: str
+    totp_secret: str
 
 
 def default_database_path(data_dir: Path = DATA_DIR) -> Path:
@@ -122,8 +127,14 @@ class AppDatabase:
         if self.read_only:
             raise RuntimeError("Cannot initialize a read-only database connection")
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.touch(mode=0o600, exist_ok=True)
+        self.path.chmod(0o600)
         with self._connect() as connection:
             connection.executescript(SCHEMA)
+            connection.execute("drop table if exists sessions")
+            connection.execute("drop table if exists users")
+            connection.execute("delete from ui_state where key in ('auth.setup_token', 'auth.login_token')")
+        (self.path.parent / "setup-token").unlink(missing_ok=True)
 
     def record_audit(
         self,
@@ -376,70 +387,126 @@ class AppDatabase:
         with self._connect() as connection:
             connection.execute("delete from ui_state where key = ?", (key,))
 
-    def consume_ui_state(self, key: str, expected: dict[str, Any]) -> bool:
+    def get_auth_credentials(self) -> AuthCredentials | None:
         with self._connect() as connection:
+            row = connection.execute("select password_hash, totp_secret from auth_credentials where id = 1").fetchone()
+        return AuthCredentials(row["password_hash"], row["totp_secret"]) if row else None
+
+    def save_auth_credentials(
+        self, *, password_hash: str, totp_secret: str, last_totp_step: int, replace: bool = False
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute("begin immediate")
+            if connection.execute("select 1 from auth_credentials where id = 1").fetchone() and not replace:
+                raise ValueError("Zugang bereits eingerichtet. Zum Ersetzen --replace verwenden.")
+            connection.execute(
+                """insert or replace into auth_credentials
+                   (id, password_hash, totp_secret, last_totp_step, attempts, blocked_until)
+                   values (1, ?, ?, ?, 0, 0)""",
+                (password_hash, totp_secret, last_totp_step),
+            )
+            connection.execute("delete from auth_sessions")
+            connection.execute("delete from auth_enrollments")
+
+    def create_enrollment(self, *, token_hash: str, password_hash: str, secret: str, expires_at: int, now: int) -> bool:
+        with self._connect() as connection:
+            connection.execute("begin immediate")
+            connection.execute("delete from auth_enrollments where expires_at <= ?", (now,))
             result = connection.execute(
-                "delete from ui_state where key = ? and value_json = ?", (key, _json_dump(expected))
+                """insert into auth_enrollments (token_hash, password_hash, secret, expires_at)
+                   select ?, password_hash, ?, ? from auth_credentials
+                   where id = 1 and password_hash = ? and totp_secret = ''""",
+                (token_hash, secret, expires_at, password_hash),
             )
         return result.rowcount == 1
 
-    def count_users(self) -> int:
-        with self._connect() as connection:
-            row = connection.execute("select count(*) as count from users").fetchone()
-        return int(row["count"])
-
-    def create_user(self, username: str) -> User:
-        username = username.strip()
-        if not username:
-            raise ValueError("Username is required")
-        now = _now()
-        with self._connect() as connection:
-            cursor = connection.execute(
-                "insert into users (username, created_at) values (?, ?)",
-                (username, now),
-            )
-            user_id = int(cursor.lastrowid)
-        return User(id=user_id, username=username, created_at=now)
-
-    def get_user(self, user_id: int) -> User | None:
-        with self._connect() as connection:
-            row = connection.execute("select * from users where id = ?", (user_id,)).fetchone()
-        return _user_from_row(row) if row is not None else None
-
-    def get_user_by_username(self, username: str) -> User | None:
-        with self._connect() as connection:
-            row = connection.execute("select * from users where username = ?", (username,)).fetchone()
-        return _user_from_row(row) if row is not None else None
-
-    def create_session(self, *, user_id: int, session_hash: str, expires_at: str) -> None:
-        now = _now()
-        with self._connect() as connection:
-            connection.execute(
-                """
-                insert into sessions (session_hash, user_id, created_at, last_seen_at, expires_at)
-                values (?, ?, ?, ?, ?)
-                """,
-                (session_hash, user_id, now, now, expires_at),
-            )
-
-    def get_user_for_session(self, session_hash: str, *, now: str | None = None) -> User | None:
-        now = now or _now()
+    def get_enrollment_secret(self, token_hash: str, *, now: int) -> str | None:
         with self._connect() as connection:
             row = connection.execute(
-                """
-                select users.*
-                from sessions
-                join users on users.id = sessions.user_id
-                where sessions.session_hash = ?
-                  and sessions.expires_at > ?
-                """,
-                (session_hash, now),
+                """select e.secret from auth_enrollments e join auth_credentials c
+                   on c.id = 1 and c.password_hash = e.password_hash and c.totp_secret = ''
+                   where e.token_hash = ? and e.expires_at > ?""",
+                (token_hash, now),
             ).fetchone()
-        return _user_from_row(row) if row is not None else None
+        return row["secret"] if row else None
+
+    def complete_enrollment(
+        self, *, token_hash: str, now: int, totp_step: int, session_hash: str, expires_at: str
+    ) -> bool:
+        with self._connect() as connection:
+            connection.execute("begin immediate")
+            row = connection.execute(
+                "select * from auth_enrollments where token_hash = ? and expires_at > ?", (token_hash, now)
+            ).fetchone()
+            if row is None:
+                return False
+            result = connection.execute(
+                """update auth_credentials set totp_secret = ?, last_totp_step = ?, attempts = 0, blocked_until = 0
+                   where id = 1 and password_hash = ? and totp_secret = ''""",
+                (row["secret"], totp_step, row["password_hash"]),
+            )
+            if result.rowcount != 1:
+                return False
+            connection.execute("delete from auth_enrollments")
+            connection.execute(
+                "insert into auth_sessions (session_hash, created_at, expires_at) values (?, ?, ?)",
+                (session_hash, _now(), expires_at),
+            )
+        return True
+
+    def reserve_login_attempt(self, *, now: int, limit: int, lock_seconds: int) -> AuthCredentials | None:
+        with self._connect() as connection:
+            connection.execute("begin immediate")
+            row = connection.execute("select * from auth_credentials where id = 1").fetchone()
+            if row is None:
+                return None
+            if row["blocked_until"] > now:
+                raise LoginThrottledError(row["blocked_until"] - now)
+            attempts = (0 if row["blocked_until"] else row["attempts"]) + 1
+            blocked_until = now + lock_seconds if attempts >= limit else 0
+            connection.execute(
+                "update auth_credentials set attempts = ?, blocked_until = ? where id = 1",
+                (attempts, blocked_until),
+            )
+        return AuthCredentials(row["password_hash"], row["totp_secret"])
+
+    def complete_login(
+        self, credentials: AuthCredentials, *, totp_step: int, session_hash: str, expires_at: str
+    ) -> bool:
+        now = _now()
+        with self._connect() as connection:
+            connection.execute("begin immediate")
+            result = connection.execute(
+                """update auth_credentials set last_totp_step = ?, attempts = 0, blocked_until = 0
+                   where id = 1 and password_hash = ? and totp_secret = ? and last_totp_step < ?""",
+                (totp_step, credentials.password_hash, credentials.totp_secret, totp_step),
+            )
+            if result.rowcount != 1:
+                return False
+            connection.execute(
+                "insert into auth_sessions (session_hash, created_at, expires_at) values (?, ?, ?)",
+                (session_hash, now, expires_at),
+            )
+        return True
+
+    def create_session(self, *, session_hash: str, expires_at: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "insert into auth_sessions (session_hash, created_at, expires_at) values (?, ?, ?)",
+                (session_hash, _now(), expires_at),
+            )
+
+    def session_valid(self, session_hash: str, *, now: str | None = None) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                "select 1 from auth_sessions where session_hash = ? and expires_at > ?",
+                (session_hash, now or _now()),
+            ).fetchone()
+        return row is not None
 
     def delete_session(self, session_hash: str) -> None:
         with self._connect() as connection:
-            connection.execute("delete from sessions where session_hash = ?", (session_hash,))
+            connection.execute("delete from auth_sessions where session_hash = ?", (session_hash,))
 
     def upsert_server_ip(self, address: str, *, label: str | None = None) -> None:
         parsed = ipaddress.ip_address(address)
@@ -640,14 +707,6 @@ def _action_from_row(row: sqlite3.Row) -> ActionRecord:
     )
 
 
-def _user_from_row(row: sqlite3.Row) -> User:
-    return User(
-        id=row["id"],
-        username=row["username"],
-        created_at=row["created_at"],
-    )
-
-
 def _json_dump(value: dict[str, Any]) -> str:
     _reject_forbidden_payload(value)
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
@@ -724,18 +783,26 @@ create table if not exists ui_state (
     updated_at text not null
 );
 
-create table if not exists users (
-    id integer primary key autoincrement,
-    username text not null unique,
-    created_at text not null
+create table if not exists auth_credentials (
+    id integer primary key check (id = 1),
+    password_hash text not null,
+    totp_secret text not null,
+    last_totp_step integer not null,
+    attempts integer not null default 0,
+    blocked_until integer not null default 0
 );
 
-create table if not exists sessions (
+create table if not exists auth_sessions (
     session_hash text primary key,
-    user_id integer not null references users(id) on delete cascade,
     created_at text not null,
-    last_seen_at text not null,
     expires_at text not null
+);
+
+create table if not exists auth_enrollments (
+    token_hash text primary key,
+    password_hash text not null,
+    secret text not null,
+    expires_at integer not null
 );
 
 create table if not exists server_ips (

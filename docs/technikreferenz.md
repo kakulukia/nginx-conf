@@ -70,7 +70,7 @@ bereits gespeicherte Auswahl verwenden.
 
 ## Technischer Stack
 
-- Backend: Python 3.13
+- Backend: Python 3.15, lokal über `.python-version` ausgewählt
 - Projekt- und Dependency-Verwaltung: `uv`
 - Webframework: FastAPI
 - Templates: Jinja2
@@ -80,7 +80,8 @@ bereits gespeicherte Auswahl verwenden.
   Ausschliesslich Desktop und Dunkelmodus, Source Code Pro, Farben aus der
   Ghostty-Shell-Palette, eckige Elemente ohne Rundungen, Schatten oder Verlaeufe.
   Hellmodus und mobile Gestaltung gehoeren nicht zum Projektumfang.
-  Die vorhandenen App-Seiten sind noch nicht darauf umgestellt.
+  Anmeldung, Authenticator-Einrichtung, Projektübersicht, Config-Editor und
+  Logs verwenden die gemeinsamen Komponenten des Styleguides.
 - Config-Editor: zuerst normales `<textarea>`, spaeter optional CodeMirror
 - Betrieb der Verwaltungs-App: systemd als eigener unprivilegierter Systemuser
 - Betrieb von Nginx: systemd
@@ -697,36 +698,65 @@ sie mit klarem Blocker.
 Ziel-Origin fuer die Verwaltungs-App auf pepperz ist `config.pepperz.de`.
 Das erste verwaltete Projekt vorspiel-abrechnung nutzt `va.pepperz.de`.
 
-Passkeys muessen auf der spaeter genutzten WebAuthn-Origin registriert werden.
-Ein lokal fuer `localhost` registrierter Passkey funktioniert nicht automatisch
-auf der Server-Domain. Eine SQLite-Datenbank mit lokal registriertem
-`localhost`-Passkey auf den Server zu kopieren ist daher kein belastbarer
-Bootstrap-Weg.
+Die Anwendung hat genau einen Zugang ohne Nutzername oder Nutzerverwaltung.
+Die reguläre Anmeldung im Browser verlangt Passwort und TOTP-Code.
+Web-Setup, Setup-Token und per SSH erzeugte Login-Tokens entfallen.
 
-Bootstrap fuer pepperz:
+Bei der Installation legt `scripts/nginx-conf-auth` ausschließlich das Passwort
+fest. Es wird verdeckt zweimal eingegeben. Beim ersten Login prüft die App
+dieses Passwort und zeigt anschließend einen lokal erzeugten QR-Code für die
+Authenticator-App. Alternativ lässt sich der Schlüssel manuell eintragen.
+Erst die Bestätigung mit einem aktuellen TOTP-Code aktiviert den Authenticator
+und erzeugt die erste App-Sitzung. Der bestätigte Code ist damit verbraucht.
 
-1. App auf dem Server starten
-2. Initial-Setup ueber einen SSH-Tunnel zu Loopback oeffnen
-3. Setup-Token aus der serverseitigen Datei lesen und Setup abschliessen
-4. einmaligen Login-Token per SSH erzeugen
-5. ueber HTTPS auf `config.pepperz.de/login` anmelden
+Die vorläufige Einrichtungsberechtigung läuft nach zehn Minuten ab. Sie ist
+an den aktuellen Passwort-Hash gebunden und erlaubt keinen Zugriff auf die
+App oder deren APIs. Ihr Zufallstoken wird serverseitig nur gehasht gespeichert;
+das HTTPS-Cookie ist Secure, HttpOnly und SameSite=Strict. Der QR-Code bleibt
+beim Neuladen und bei falscher Code-Eingabe gleich. Die Authentifizierungsseiten
+werden mit `Cache-Control: no-store` und `Referrer-Policy: same-origin` ausgeliefert.
+Damit bleiben externe Referrer unterdrückt und der Browser sendet bei eigenen
+Formularen weiterhin den prüfbaren Origin.
+Einrichtung und Sitzung werden atomar gespeichert. Eine parallele Einrichtung
+kann einen bereits bestätigten Authenticator nicht überschreiben. Nach der
+Bestätigung werden alle vorläufigen Einrichtungsberechtigungen gelöscht.
 
-MVP-Implementierung: Solange kein Nutzer existiert, ist nur der Setup-Pfad
-offen. Die App erzeugt ein einmaliges Setup-Token und schreibt es serverseitig
-unterhalb der SQLite-Datenablage in eine Datei `setup-token` mit Dateimodus
-`0600`; im Browser wird nur der Pfad angezeigt. Nach erfolgreichem Setup wird
-ein erster Nutzer angelegt, das Token geloescht, die angegebenen oeffentlichen
-Server-IP-Adressen fuer DNS-Preflight in SQLite gespeichert und ein
-HttpOnly-Session-Cookie gesetzt. Danach brauchen alle Verwaltungsrouten eine
-gueltige Session. Ein erneuter Login ist mit einem per SSH erzeugten,
-zehn Minuten gueltigen Einmal-Token moeglich. Der Token wird nur gehasht
-gespeichert, bei Nutzung atomar verbraucht und bei Neuausstellung ersetzt.
-HTTPS-Session-Cookies sind Secure, HttpOnly und SameSite=Lax. Ein Logout
-invalidiert die serverseitige Session. WebAuthn/Passkey-Registrierung bleibt ein separater Ausbau
-auf der echten Origin.
+Zum Wiederherstellen nach Verlust dient derselbe lokale Installationsbefehl
+mit `--replace`. Er setzt ein neues Passwort, entfernt den Authenticator und
+invalidiert alle Sessions und laufenden Einrichtungen. Beim nächsten Login
+wird der Authenticator wieder im Browser eingerichtet.
 
-Passkey/WebAuthn ist zusaetzliche Authentifizierung, aber kein Ersatz fuer
-Netzwerkbegrenzung und minimale Systemrechte.
+`argon2-cffi` speichert das Passwort als Argon2id-Hash mit eigenem Salt,
+64 MiB Speicher, drei Durchläufen und Parallelität 1. `PyOTP` prüft sechsstellige
+Codes in 30-Sekunden-Intervallen mit einer Toleranz von einem Intervall in
+beide Richtungen. Der zuletzt verwendete Zeitschritt und die Session werden
+in einer SQLite-Transaktion geschrieben. Ein Code kann auch bei parallelen
+Anmeldungen nur einmal verwendet werden; ein laufender Login mit zwischenzeitlich
+ersetzten Zugangsdaten wird verworfen.
+
+Vor der Passwortprüfung wird jeder Versuch atomar reserviert. Fünf Versuche
+ohne erfolgreiche Anmeldung sperren weitere Versuche für 60 Sekunden.
+Der Zähler liegt in SQLite und bleibt bei einem Prozessneustart erhalten.
+Passwortprüfung und Code-Bestätigung teilen diesen Zähler. Erst eine vollständig
+erfolgreiche Anmeldung setzt ihn zurück. Sperren antworten mit HTTP 429 und
+`Retry-After`. Andere fehlgeschlagene Anmeldungen verraten nicht, welcher
+Faktor falsch war.
+
+Die SQLite-Datei enthält einen einzelnen Zugang und dessen TOTP-Geheimnis
+und ist nur für den App-Systemnutzer les- und schreibbar (`0600`). Backups
+enthalten ebenfalls dieses Geheimnis. Session-Tokens werden ausschließlich
+gehasht gespeichert. HTTPS-Cookies sind Secure, HttpOnly und SameSite=Lax;
+Sessions laufen nach 30 Tagen ab. Abmelden invalidiert die serverseitige Session.
+
+Die Migration entfernt alte Nutzer- und Session-Tabellen sowie alte
+Setup-/Login-Tokens. Produktdaten, Audit-Daten und gespeicherte Server-IPs
+bleiben erhalten. IPs sind keine Anmeldeangaben und sollen später über einen
+separaten Dialog gepflegt werden. Keine automatische Ableitung öffentlicher
+IPs aus lokalen Netzwerkschnittstellen.
+
+Quellen: [OWASP zur Passwortspeicherung](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html),
+[PyOTP](https://pyauth.github.io/pyotp/) und
+[argon2-cffi](https://argon2-cffi.readthedocs.io/en/stable/howto.html).
 
 Bevorzugte Netzwerkbegrenzung fuer `config.pepperz.de` ist eine oeffentliche
 DNS-Domain mit strikter IP-Allowlist. Tailscale oder VPN bleiben Alternativen.
@@ -746,10 +776,6 @@ Die Web-App schreibt diese Allowlist-Datei im MVP nicht direkt. Falls spaeter
 eine App-Aktion dafuer eingefuehrt wird, muss sie denselben Inhalt rendern,
 Backup und Audit-Log schreiben, `nginx -t` ausfuehren und Nginx nur nach
 erfolgreichem Test reloaden.
-
-Der Hosts-Datei-Trick ist nur eine Notloesung: Domain muss exakt zur
-WebAuthn-RP-ID passen, HTTPS-Zertifikat muss gueltig sein, und der Weg ist fuer
-den normalen Setup-Pfad fehleranfaellig.
 
 ## Qualitaetssicherung
 

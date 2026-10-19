@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 from datetime import UTC, datetime
@@ -7,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from nginx_conf import logs as logs_module
 from nginx_conf import main
-from nginx_conf.auth import SESSION_COOKIE_NAME, create_session, setup_token_path_for_database
+from nginx_conf.auth import PASSWORD_HASHER, SESSION_COOKIE_NAME, configure_password
 from nginx_conf.certbot_renewal import CertbotRenewalMechanism, CertbotRenewalStatus
 from nginx_conf.dns_preflight import DNSPreflightResult, DomainDNSResult
 from nginx_conf.helper import handle_helper_request
@@ -27,8 +28,10 @@ ROOT = main.Path(__file__).parent
 
 def authenticate_test_client(db: AppDatabase) -> None:
     client.cookies.clear()
-    user = db.create_user("admin")
-    session_token = create_session(db, user)
+    session_token = "local-test-session"
+    db.create_session(
+        session_hash=hashlib.sha256(session_token.encode()).hexdigest(), expires_at="9999-01-01T00:00:00+00:00"
+    )
     client.cookies.set(SESSION_COOKIE_NAME, session_token)
 
 
@@ -292,66 +295,23 @@ def test_django_deploy_action_api_rejects_missing_environment(monkeypatch, tmp_p
     assert "missing_python_environment" in response.json()["detail"]
 
 
-def test_setup_page_creates_server_side_token_file(monkeypatch, tmp_path) -> None:
-    client.cookies.clear()
-    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "nginx-conf.sqlite3")
-    response = client.get("/setup")
-
-    token_path = setup_token_path_for_database(main.DATABASE_PATH)
-    token = token_path.read_text(encoding="utf-8").strip()
-
-    assert response.status_code == 200
-    assert token
-    assert token not in response.text
-    assert str(token_path) in response.text
-
-
-def test_setup_api_creates_user_session_and_server_ips(monkeypatch, tmp_path) -> None:
-    client.cookies.clear()
-    monkeypatch.setattr(main, "PROJECT_ROOT", tmp_path / "opt/www")
-    monkeypatch.setattr(main, "SITES_ENABLED_ROOT", tmp_path / "etc/nginx/sites-enabled")
-    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "nginx-conf.sqlite3")
-    monkeypatch.setattr(main, "LETSENCRYPT_ROOT", tmp_path / "etc/letsencrypt")
-    db = AppDatabase(main.DATABASE_PATH)
-    db.initialize()
-    token_path = setup_token_path_for_database(main.DATABASE_PATH)
-    client.get("/setup")
-    token = token_path.read_text(encoding="utf-8").strip()
-
-    response = client.post(
-        "/api/setup",
-        json={
-            "setup_token": token,
-            "username": "admin",
-            "server_ips": ["203.0.113.10", "2001:db8::10"],
-        },
+def test_unconfigured_app_has_only_login_and_no_web_setup(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "auth.sqlite3")
+    browser = TestClient(main.app, follow_redirects=False)
+    assert browser.get("/").headers["location"] == "/login"
+    assert browser.get("/api/projects").status_code == 401
+    page = browser.get("/login")
+    assert page.status_code == 200
+    assert "Passwort" in page.text and 'name="totp_code"' not in page.text
+    assert "Nutzername" not in page.text and "Setup-Token" not in page.text
+    assert "disabled" in page.text
+    assert main.get_database().get_auth_credentials() is None
+    main.get_database().create_session(
+        session_hash=hashlib.sha256(b"local-test-session").hexdigest(), expires_at="9999-01-01T00:00:00+00:00"
     )
-
-    assert response.status_code == 200
-    assert response.json() == {"ok": True, "username": "admin"}
-    assert SESSION_COOKIE_NAME in client.cookies
-    assert AppDatabase(main.DATABASE_PATH).count_users() == 1
-    assert not token_path.exists()
-    assert [entry.address for entry in AppDatabase(main.DATABASE_PATH).list_server_ips()] == [
-        "2001:db8::10",
-        "203.0.113.10",
-    ]
-
-
-def test_api_requires_session_after_setup(monkeypatch, tmp_path) -> None:
-    client.cookies.clear()
-    monkeypatch.setattr(main, "PROJECT_ROOT", tmp_path / "opt/www")
-    monkeypatch.setattr(main, "SITES_ENABLED_ROOT", tmp_path / "etc/nginx/sites-enabled")
-    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "nginx-conf.sqlite3")
-    monkeypatch.setattr(main, "LETSENCRYPT_ROOT", tmp_path / "etc/letsencrypt")
-    db = AppDatabase(main.DATABASE_PATH)
-    db.initialize()
-    db.create_user("admin")
-
-    response = client.get("/api/projects")
-
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Authentication required"
+    browser.cookies.set(SESSION_COOKIE_NAME, "local-test-session")
+    assert browser.get("/setup").status_code == 404
+    assert browser.post("/api/setup", json={}).status_code == 404
 
 
 def test_home_page_shows_missing_django_allowed_hosts_at_domain_group(monkeypatch, tmp_path) -> None:
@@ -1387,6 +1347,20 @@ def test_config_detail_rejects_free_path(monkeypatch, tmp_path) -> None:
     assert response.status_code == 404
 
 
+def test_config_editor_escapes_diff_and_scopes_reset_confirmation(monkeypatch, tmp_path) -> None:
+    _, _, config = configure_git_project_roots(monkeypatch, tmp_path)
+    config.write_text('server { listen 80; }\n# </textarea><script>alert("example")</script>\n', encoding="utf-8")
+
+    response = client.get("/configs/demo-app/app.nginx")
+
+    assert response.status_code == 200
+    assert '<script>alert("example")</script>' not in response.text
+    assert "&lt;/textarea&gt;&lt;script&gt;" in response.text
+    assert 'aria-labelledby="reset-config-title"' in response.text
+    assert 'action="/api/projects/demo-app/git/reset"' in response.text
+    assert 'id="cancel-reset" autofocus' in response.text
+
+
 def test_health() -> None:
     response = client.get("/health")
 
@@ -1394,51 +1368,51 @@ def test_health() -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_login_form_redirects_sets_secure_cookie_and_rejects_reuse(monkeypatch, tmp_path) -> None:
-    from nginx_conf.auth import issue_login_token
+def test_password_totp_login_sets_secure_cookie_and_rejects_replay(monkeypatch, tmp_path) -> None:
+    import time
+
+    import pyotp
+
+    from nginx_conf.auth import session_valid
 
     monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "auth.sqlite3")
     db = main.get_database()
-    db.create_user("andy")
-    token = issue_login_token(db, "andy")
-    browser = TestClient(main.app, base_url="https://config.pepperz.de", follow_redirects=False)
-    assert browser.get("/").headers["location"] == "/login"
-    assert "Login-Token" in browser.get("/login").text
-    for payload in ({}, {"login_token": "wrong"}):
-        response = browser.post("/api/login", data=payload)
-        assert response.status_code == 400
-        assert 'role="alert"' in response.text
-    assert (
-        browser.post(
-            "/api/login", data={"login_token": token}, headers={"Origin": "https://foreign.example"}
-        ).status_code
-        == 403
+    password = "local-test-password"
+    secret = "JBSWY3DPEHPK3PXP"
+    now = int(time.time())
+    db.save_auth_credentials(
+        password_hash=PASSWORD_HASHER.hash(password), totp_secret=secret, last_totp_step=(now - 60) // 30
     )
-    response = browser.post("/api/login", data={"login_token": token})
-    assert response.status_code == 303
-    assert response.headers["location"] == "/"
-    assert "Secure" in response.headers["set-cookie"]
-    assert "HttpOnly" in response.headers["set-cookie"]
-    session = browser.cookies.get(SESSION_COOKIE_NAME)
+    browser = TestClient(main.app, base_url="https://config.pepperz.de", follow_redirects=False)
+    page = browser.get("/login")
+    assert 'name="totp_code"' in page.text and 'class="nc-otp__input"' in page.text
+    assert 'src="https://config.pepperz.de/static/otp.js"' in page.text
+    assert 'placeholder="000000"' not in page.text
+    for payload in ({}, {"password": password, "totp_code": "wrong"}):
+        response = browser.post("/api/login", data=payload)
+        assert response.status_code == 401 and 'role="alert"' in response.text
+        assert password not in response.text
+    data = {"password": password, "totp_code": pyotp.TOTP(secret).at(now)}
+    assert browser.post("/api/login", data=data, headers={"Origin": "https://foreign.example"}).status_code == 403
+    response = browser.post("/api/login", data=data)
+    assert response.status_code == 303 and response.headers["location"] == "/"
+    assert "Secure" in response.headers["set-cookie"] and "HttpOnly" in response.headers["set-cookie"]
+    token = browser.cookies.get(SESSION_COOKIE_NAME)
     assert browser.get("/login").headers["location"] == "/"
     assert browser.post("/api/logout").headers["location"] == "/login"
-    from nginx_conf.auth import user_for_session
+    assert not session_valid(db, token)
+    assert browser.post("/api/login", json=data).status_code == 401
+    assert db.list_server_ips() == []
 
-    assert user_for_session(db, session) is None
-    assert browser.post("/api/login", json={"login_token": token}).status_code == 400
 
-
-def test_setup_html_form_redirects_and_reports_invalid_input(monkeypatch, tmp_path) -> None:
+def test_login_rate_limit_returns_retry_after(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "auth.sqlite3")
-    browser = TestClient(main.app, follow_redirects=False)
-    browser.get("/setup")
-    token = setup_token_path_for_database(main.DATABASE_PATH).read_text().strip()
-    for data in ({"setup_token": "wrong"}, {"setup_token": token, "username": "andy", "server_ips": "invalid"}):
-        response = browser.post("/api/setup", data=data)
-        assert response.status_code == 400 and 'role="alert"' in response.text
-    response = browser.post("/api/setup", data={"setup_token": token, "username": "andy", "server_ips": "81.169.200.21"})
-    assert response.status_code == 303 and response.headers["location"] == "/"
-    assert main.get_database().count_users() == 1
+    configure_password(main.get_database(), password="local-test-password")
+    browser = TestClient(main.app)
+    for _ in range(5):
+        assert browser.post("/api/login", data={"password": "wrong", "totp_code": "123456"}).status_code == 401
+    response = browser.post("/api/login", data={"password": "wrong", "totp_code": "123456"})
+    assert response.status_code == 429 and int(response.headers["retry-after"]) > 0
 
 
 def test_pm2_save_failure_keeps_registry_consistent_with_real_create_and_delete(monkeypatch, tmp_path) -> None:
@@ -1459,3 +1433,80 @@ def test_pm2_save_failure_keeps_registry_consistent_with_real_create_and_delete(
     response = client.post("/api/projects/demo-app/pm2/demo-app/delete")
     assert response.status_code == 200 and response.json()["ok"] is False
     assert main.get_database().list_managed_pm2_processes("demo-app") == []
+
+
+def test_first_login_enrolls_authenticator_before_granting_app_access(monkeypatch, tmp_path) -> None:
+    import time
+
+    import pyotp
+
+    from nginx_conf import auth
+
+    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "auth.sqlite3")
+    now = int(time.time())
+    monkeypatch.setattr(auth.time, "time", lambda: now)
+    db = main.get_database()
+    password = "local-test-password"
+    configure_password(db, password=password)
+    browser = TestClient(main.app, base_url="https://config.pepperz.de", follow_redirects=False)
+    assert browser.get("/login/authenticator").status_code == 401
+    assert browser.post("/api/login/authenticator", data={"totp_code": "123456"}).status_code == 401
+    assert 'name="totp_code"' not in browser.get("/login").text
+    assert browser.post("/api/login", data={"password": "wrong"}).status_code == 401
+    response = browser.post("/api/login", data={"password": password}, headers={"Origin": "https://config.pepperz.de"})
+    assert response.status_code == 303 and response.headers["location"] == "/login/authenticator"
+    assert SESSION_COOKIE_NAME not in browser.cookies
+    cookie = response.headers["set-cookie"]
+    assert "Secure" in cookie and "HttpOnly" in cookie and "SameSite=strict" in cookie and "Max-Age=600" in cookie
+    assert browser.get("/").headers["location"] == "/login"
+    assert browser.get("/api/projects").status_code == 401
+    proof = browser.cookies.get(auth.ENROLLMENT_COOKIE_NAME)
+    secret = auth.enrollment_secret(db, proof)
+    page = browser.get("/login/authenticator")
+    assert page.status_code == 200 and "<svg" in page.text and secret in page.text
+    assert 'name="totp_code"' in page.text and 'class="nc-otp__input"' in page.text
+    assert 'placeholder="000000"' not in page.text
+    assert page.headers["cache-control"] == "no-store"
+    assert page.headers["referrer-policy"] == "same-origin"
+    assert browser.get("/login/authenticator").text == page.text
+    assert auth.enrollment_secret(db, proof) == secret
+    assert secret not in browser.get("/login").text
+    code = pyotp.TOTP(secret).at(now)
+    rejected = browser.post(
+        "/api/login/authenticator", data={"totp_code": code}, headers={"Origin": "https://foreign.example"}
+    )
+    assert rejected.status_code == 403
+    assert (
+        browser.post("/api/login/authenticator", data={"totp_code": code}, headers={"Origin": "null"}).status_code == 403
+    )
+    invalid = browser.post("/api/login/authenticator", data={"totp_code": "wrong"})
+    assert invalid.status_code == 401 and 'role="alert"' in invalid.text and secret in invalid.text
+    assert db.get_auth_credentials().totp_secret == ""
+    response = browser.post(
+        "/api/login/authenticator", data={"totp_code": code}, headers={"Origin": "https://config.pepperz.de"}
+    )
+    assert response.status_code == 303 and response.headers["location"] == "/"
+    assert SESSION_COOKIE_NAME in browser.cookies and auth.ENROLLMENT_COOKIE_NAME not in browser.cookies
+    assert auth.session_valid(db, browser.cookies.get(SESSION_COOKIE_NAME))
+    assert browser.get("/login").headers["location"] == "/"
+    assert "<svg" not in browser.get("/login/authenticator").text
+    browser.post("/api/logout")
+    assert 'name="totp_code"' in browser.get("/login").text
+    assert browser.post("/api/login", data={"password": password}).status_code == 401
+
+
+def test_expired_enrollment_returns_to_password_login(monkeypatch, tmp_path) -> None:
+    from nginx_conf import auth
+
+    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "auth.sqlite3")
+    clock = [1_700_000_000]
+    monkeypatch.setattr(auth.time, "time", lambda: clock[0])
+    db = main.get_database()
+    configure_password(db, password="local-test-password")
+    browser = TestClient(main.app, follow_redirects=False)
+    browser.post("/api/login", data={"password": "local-test-password"})
+    clock[0] += 600
+    page = browser.post("/api/login/authenticator", data={"totp_code": "123456"})
+    assert page.status_code == 401 and "abgelaufen" in page.text
+    assert "<svg" not in page.text and auth.ENROLLMENT_COOKIE_NAME not in browser.cookies
+    assert db.get_auth_credentials().totp_secret == ""

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "_otp.html" import otp %}
+{% block page_class %}app-auth{% endblock %}
+{% block header %}{% endblock %}
+{% block content %}
+  <div class="app-title">
+    <h1 class="nc-display">Authenticator einrichten</h1>
+    <p class="nc-text">Scanne den QR-Code mit deiner Authenticator-App und bestätige die Einrichtung mit dem aktuellen Code.</p>
+  </div>
+  <div class="app-auth__qr" role="img" aria-label="QR-Code zum Einrichten deiner Authenticator-App">{{ qr | safe }}</div>
+  <details class="nc-disclosure">
+    <summary>Schlüssel manuell eingeben</summary>
+    <div class="nc-disclosure__body"><p class="nc-text">Falls du den QR-Code nicht scannen kannst, trage diesen Schlüssel in deiner Authenticator-App ein.</p><code class="app-auth__secret">{{ secret }}</code></div>
+  </details>
+  <form class="nc-form" action="/api/login/authenticator" method="post">
+    <div class="app-field">
+      <label class="nc-label" for="totp-code">TOTP-Code</label>
+      {{ otp('totp-code', name='totp_code', required=true, invalid=error, describedby='enrollment-error' if error else '') }}
+    </div>
+    {% if error %}<p class="nc-error" id="enrollment-error" role="alert">{{ error }}</p>{% endif %}
+    <div class="app-actions"><a class="nc-button" href="/login">Zurück</a><button class="nc-button nc-button--save" type="submit">Einrichtung bestätigen</button></div>
+  </form>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='otp.js') }}" defer></script>{% endblock %}

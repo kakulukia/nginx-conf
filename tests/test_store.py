@@ -42,9 +42,10 @@ def test_initialize_creates_sqlite_schema(tmp_path: Path) -> None:
         "managed_pm2_processes",
         "project_selections",
         "server_ips",
-        "sessions",
+        "auth_credentials",
+        "auth_sessions",
+        "auth_enrollments",
         "ui_state",
-        "users",
     }.issubset(tables)
 
 
@@ -70,13 +71,10 @@ def test_basic_crud_for_audit_ui_ips_selection_and_pm2(tmp_path: Path) -> None:
     db.delete_ui_state("dashboard")
     assert db.get_ui_state("dashboard") is None
 
-    user = db.create_user("admin")
-    assert db.count_users() == 1
-    assert db.get_user(user.id).username == "admin"
-    db.create_session(user_id=user.id, session_hash="session-hash", expires_at="9999-01-01T00:00:00+00:00")
-    assert db.get_user_for_session("session-hash").username == "admin"
+    db.create_session(session_hash="session-hash", expires_at="9999-01-01T00:00:00+00:00")
+    assert db.session_valid("session-hash")
     db.delete_session("session-hash")
-    assert db.get_user_for_session("session-hash") is None
+    assert not db.session_valid("session-hash")
 
     db.upsert_server_ip("203.0.113.10", label="public-v4")
     db.upsert_server_ip("2001:db8::10", label="public-v6")
