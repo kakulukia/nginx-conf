@@ -179,6 +179,19 @@ rechts. Escape schließt den Dialog. Die darunterliegende Seite bleibt
 währenddessen gesperrt; nach dem Schließen kehrt der Fokus zum Auslöser zurück. Die Bestätigung im
 Styleguide ändert ausschließlich die lokale Rückmeldung, keine Config-Datei.
 
+Die Tabelle „Domains und Projekte“ zeigt aktive und inaktive Domains mit
+rechts ausgerichteten Aktionen. „Config öffnen“ zeigt die zugehörige Datei
+mit Projekt, Pfad und bearbeitbarem Inhalt in einem nativen Dialog.
+Änderungen werden beim Schließen verworfen. Escape schließt den Dialog;
+der Fokus kehrt zur jeweiligen Tabellenaktion zurück.
+„Nginx neu laden“ meldet ausschließlich einen simulierten Reload zurück.
+Die Beschriftung erklärt den globalen Umfang: Ein Reload betrifft alle
+aktiven Konfigurationen. Bei inaktiven Domains ist die Aktion deaktiviert.
+Kopieren, Config öffnen und Nginx neu laden nutzen kompakte Icon-Buttons
+mit 18 px Symbolgröße und 40 px Klickfläche. Tooltips und zugängliche Namen
+benennen die Aktion und ihren Bezug. Fokus, Hover und deaktivierter Zustand
+entsprechen den übrigen Buttons.
+
 ## Favicon
 
 Das Favicon verwendet die gewählten geschweiften Klammern in Aktionsblau

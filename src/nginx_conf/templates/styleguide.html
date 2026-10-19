@@ -1,4 +1,11 @@
 {% from "_otp.html" import otp %}
+{% macro action_icon(name) -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+  {% if name == "copy" %}<rect x="8" y="8" width="12" height="12"/><path d="M16 8V4H4v12h4"/>
+  {% elif name == "config" %}<path d="M14 3H5v18h14V8l-5-5Zm0 0v5h5M10 12l-3 3 3 3m4-6 3 3-3 3"/>
+  {% elif name == "reload" %}<path d="M20 4v6h-6M20 10a8 8 0 1 0 0 5"/>{% endif %}
+</svg>
+{%- endmacro %}
 <!doctype html>
 <html lang="de">
   <head>
@@ -248,16 +255,54 @@
       </section>
 
       <section class="sg-section" id="tabelle">
-        <h2 class="nc-heading">Tabelle</h2>
-        <div class="nc-table-wrap">
-          <table class="nc-table">
-            <thead><tr><th>Projekt</th><th>Domain</th><th>Status</th><th class="nc-table__num">Port</th></tr></thead>
+        <h2 class="nc-heading" id="project-table-title">Domains und Projekte</h2>
+        <p class="nc-text">Config direkt öffnen oder Nginx neu laden. Ein Reload betrifft alle aktiven Konfigurationen. Diese Beispiele greifen nicht auf den Server zu.</p>
+        {% set projects = [
+          {"domain": "va.pepperz.de", "project": "vorspiel-abrechnung", "port": 8000, "active": true, "path": "/opt/www/vorspiel-abrechnung/.nginx/va.pepperz.de.conf"},
+          {"domain": "config.pepperz.de", "project": "nginx-conf", "port": 8765, "active": true, "path": "/etc/nginx/sites-available/config.pepperz.de.conf"},
+          {"domain": "archiv.pepperz.de", "project": "projektarchiv", "port": 8001, "active": false, "path": "/opt/www/projektarchiv/.nginx/archiv.pepperz.de.conf"}
+        ] %}
+        <div class="nc-scroll sg-project-table" tabindex="0" role="region" aria-labelledby="project-table-title">
+          <table class="nc-table" aria-labelledby="project-table-title">
+            <thead><tr><th scope="col">Domain</th><th scope="col">Projekt</th><th scope="col">Status</th><th scope="col" class="nc-table__num">Aktionen</th></tr></thead>
             <tbody>
-              <tr><td>vorspiel-abrechnung</td><td>va.pepperz.de</td><td><span class="nc-status nc-status--success">Aktiv</span></td><td class="nc-table__num">8000</td></tr>
-              <tr><td>nginx-conf</td><td>config.pepperz.de</td><td><span class="nc-status">Beispiel</span></td><td class="nc-table__num">8765</td></tr>
+              {% for project in projects %}
+              <tr>
+                <td>{{ project.domain }}</td>
+                <td>{{ project.project }}</td>
+                <td><span class="nc-status{% if project.active %} nc-status--success{% endif %}">{{ "Aktiv" if project.active else "Inaktiv" }}</span></td>
+                <td><div class="sg-actions">
+                  <button type="button" class="nc-button nc-button--quiet nc-button--icon" data-config-example="config-source-{{ loop.index }}" data-domain="{{ project.domain }}" data-project="{{ project.project }}" data-path="{{ project.path }}" aria-label="Config öffnen: {{ project.domain }}" title="Config öffnen: {{ project.domain }}">{{ action_icon("config") }}</button>
+                  <button type="button" class="nc-button nc-button--icon" data-reload-example aria-label="Nginx neu laden: alle aktiven Konfigurationen, ausgehend von {{ project.domain }}" title="{{ 'Nginx neu laden: alle aktiven Konfigurationen' if project.active else 'Reload nicht verfügbar: Diese Konfiguration ist inaktiv.' }}"{% if not project.active %} disabled{% endif %}>{{ action_icon("reload") }}</button>
+                </div></td>
+              </tr>
+              {% endfor %}
             </tbody>
           </table>
         </div>
+        <p class="nc-text nc-text--small" id="reload-example-feedback" role="status">Bei inaktiven Domains ist der Reload-Button deaktiviert.</p>
+        {% for project in projects %}
+        <template id="config-source-{{ loop.index }}">server {
+    listen 80;
+    server_name {{ project.domain }};
+
+    location / {
+        proxy_pass http://127.0.0.1:{{ project.port }};
+    }
+}</template>
+        {% endfor %}
+        <dialog class="nc-dialog sg-config-dialog" id="config-dialog-example" aria-labelledby="config-dialog-title" aria-describedby="config-dialog-note">
+          <h2 class="nc-heading" id="config-dialog-title">Config</h2>
+          <div class="nc-dialog__file"><span class="nc-row__sub" id="config-dialog-project"></span><code id="config-dialog-path"></code></div>
+          <div class="nc-field">
+            <label class="nc-label" for="config-dialog-content">Nginx-Konfiguration</label>
+            <textarea class="nc-input nc-textarea" id="config-dialog-content" rows="9" spellcheck="false" aria-describedby="config-dialog-note"></textarea>
+          </div>
+          <p class="nc-text nc-text--small" id="config-dialog-note">Bearbeitbares Beispiel. Änderungen werden beim Schließen verworfen.</p>
+          <form method="dialog" class="nc-dialog__actions">
+            <button class="nc-button nc-button--quiet" autofocus>Schließen</button>
+          </form>
+        </dialog>
       </section>
 
       <section class="sg-section" id="links">
@@ -350,9 +395,9 @@ nginx: configuration file /etc/nginx/nginx.conf test failed</code></pre></div>
       <section class="sg-section" id="kopieren">
         <h2 class="nc-heading">Technische Werte kopieren</h2>
         <div class="nc-list">
-          <div class="nc-row nc-copy-row"><span><span class="nc-row__sub">Domain</span><code id="copy-domain">va.pepperz.de</code></span><button class="nc-button" type="button" data-copy-target="copy-domain" data-copy-label="Domain" aria-label="Domain kopieren">Kopieren</button></div>
-          <div class="nc-row nc-copy-row"><span><span class="nc-row__sub">Pfad</span><code id="copy-path">/opt/www/vorspiel-abrechnung/.nginx/va.pepperz.de.conf</code></span><button class="nc-button" type="button" data-copy-target="copy-path" data-copy-label="Pfad" aria-label="Pfad kopieren">Kopieren</button></div>
-          <div class="nc-row nc-copy-row"><span><span class="nc-row__sub">Einmalige Einrichtung bei der Installation</span><code id="copy-command">sudo -u nginx-config /opt/nginx-conf/.venv/bin/python -I /opt/nginx-conf/scripts/nginx-conf-auth</code></span><button class="nc-button" type="button" data-copy-target="copy-command" data-copy-label="SSH-Befehl" aria-label="SSH-Befehl kopieren">Kopieren</button></div>
+          <div class="nc-row nc-copy-row"><span><span class="nc-row__sub">Domain</span><code id="copy-domain">va.pepperz.de</code></span><button class="nc-button nc-button--icon" type="button" data-copy-target="copy-domain" data-copy-label="Domain" aria-label="Domain kopieren" title="Domain kopieren">{{ action_icon("copy") }}</button></div>
+          <div class="nc-row nc-copy-row"><span><span class="nc-row__sub">Pfad</span><code id="copy-path">/opt/www/vorspiel-abrechnung/.nginx/va.pepperz.de.conf</code></span><button class="nc-button nc-button--icon" type="button" data-copy-target="copy-path" data-copy-label="Pfad" aria-label="Pfad kopieren" title="Pfad kopieren">{{ action_icon("copy") }}</button></div>
+          <div class="nc-row nc-copy-row"><span><span class="nc-row__sub">Einmalige Einrichtung bei der Installation</span><code id="copy-command">sudo -u nginx-config /opt/nginx-conf/.venv/bin/python -I /opt/nginx-conf/scripts/nginx-conf-auth</code></span><button class="nc-button nc-button--icon" type="button" data-copy-target="copy-command" data-copy-label="SSH-Befehl" aria-label="SSH-Befehl kopieren" title="SSH-Befehl kopieren">{{ action_icon("copy") }}</button></div>
         </div>
         <p class="nc-text nc-text--small" id="copy-feedback" role="status">Die Kopieraktionen schreiben den jeweiligen Beispielwert in die Zwischenablage.</p>
       </section>
@@ -504,6 +549,24 @@ nginx: configuration file /etc/nginx/nginx.conf test failed</code></pre></div>
             feedback.className = 'nc-error';
             feedback.textContent = 'Kopieren nicht möglich. Bitte den Text markieren und manuell kopieren.';
           }
+        });
+      });
+      const configDialog = document.getElementById('config-dialog-example');
+      document.querySelectorAll('[data-config-example]').forEach(button => {
+        button.addEventListener('click', () => {
+          document.getElementById('config-dialog-title').textContent = button.dataset.domain;
+          document.getElementById('config-dialog-project').textContent = button.dataset.project;
+          document.getElementById('config-dialog-path').textContent = button.dataset.path;
+          document.getElementById('config-dialog-content').value = document.getElementById(button.dataset.configExample).content.textContent;
+          configDialog.showModal();
+        });
+      });
+      configDialog.addEventListener('close', () => {
+        document.getElementById('config-dialog-content').value = '';
+      });
+      document.querySelectorAll('[data-reload-example]').forEach(button => {
+        button.addEventListener('click', () => {
+          document.getElementById('reload-example-feedback').textContent = 'Reload aller aktiven Nginx-Konfigurationen im Beispiel bestätigt. Der Server wurde nicht verändert.';
         });
       });
       const resetExample = document.getElementById('reset-example');
