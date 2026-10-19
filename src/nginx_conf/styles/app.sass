@@ -17,6 +17,28 @@
   gap: 12px
   color: var(--nc-fg)
   font-weight: 700
+.app-menu
+  position: relative
+  flex-shrink: 0
+.app-menu__panel
+  position: absolute
+  z-index: 20
+  top: 100%
+  right: 0
+  width: 256px
+  padding: 8px 0
+  border: 1px solid var(--nc-line)
+  background: var(--nc-bg)
+  &:not([hidden])
+    display: grid
+  .nc-button
+    width: 100%
+    justify-content: flex-start
+    font-weight: 400
+  .app-menu__logout
+    margin-top: 8px
+    padding-top: 8px
+    border-top: 1px solid var(--nc-line)
 .app-main
   display: grid
   grid-template-columns: minmax(0, 1fr)

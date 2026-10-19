@@ -445,6 +445,10 @@ kein MVP-Verhalten.
 
 ## Projektanlage
 
+Die Projektanlage öffnet über „Projekt klonen“ im globalen Icon-Menü einen
+Dialog mit Repository-Feld. Nginx-Test, Reload, Styleguide und Abmelden liegen
+ebenfalls in diesem Menü; die globalen Aktions-Locks bleiben unverändert.
+
 Im MVP werden vorhandene Projektordner unter `/opt/www` inventarisiert. Ein
 spaeterer "Projekt hinzufuegen"-Workflow kann ein Projekt ueber eine GitHub-
 Clone-URL auf den Server holen, damit der Ordner nicht manuell angelegt werden

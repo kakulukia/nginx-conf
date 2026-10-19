@@ -22,6 +22,14 @@ Der Tastaturfokus bleibt sichtbar.
 Anmeldung, Projektübersicht, Config-Editor und Logs verwenden dieselben
 Komponenten wie die Referenz. Das gemeinsame Seitenlayout liegt in `base.html`,
 das App-Layout in `app.sass`. Beide Sass-Einstiegspunkte laden `_components.sass`.
+Globale Aktionen liegen im Icon-Menü oben rechts: Styleguide, Nginx neu laden,
+Nginx testen, Projekt klonen und Abmelden. Es öffnet beim Darüberfahren oder
+per Klick beziehungsweise Tastatur. Escape, Klick außerhalb oder Verlassen
+mit der Tastatur schließen es. Bei laufender Systemaktion sind weitere
+Systemaktionen deaktiviert; Styleguide und Abmelden bleiben erreichbar.
+„Projekt klonen“ öffnet den vorhandenen Dialogbaustein mit Repository-Feld,
+roten Fehlermeldungen und rechts ausgerichteten Aktionen. Nach erfolgreicher
+Serveraktion aktualisiert sich die Seite und zeigt das Ergebnis im Banner.
 Die reguläre Anmeldung enthält Passwort und TOTP-Code. Beim ersten Login
 folgt nach der Passwortprüfung die Authenticator-Einrichtung mit QR-Code,
 optionalem manuellen Schlüssel und Code-Bestätigung. Beide Ansichten sind

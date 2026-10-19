@@ -178,6 +178,23 @@ def test_home_page(monkeypatch, tmp_path) -> None:
     assert "/api/projects/clone" in response.text
 
 
+def test_header_actions_stay_locked_while_another_action_runs(monkeypatch, tmp_path) -> None:
+    configure_test_roots(monkeypatch, tmp_path)
+    db = AppDatabase(main.DATABASE_PATH)
+    db.create_action(action_type="nginx-test", target="nginx")
+
+    response = client.get("/")
+    header = response.text.split("</header>")[0]
+    for label in ["Nginx neu laden", "Nginx testen", "Projekt klonen"]:
+        button = header.split(f">{label}</button>")[0].rsplit("<button", 1)[-1]
+        assert " disabled" in button
+    assert 'href="/styleguide"' in header
+    assert 'action="/api/logout"' in header
+    clone_dialog = response.text.split('id="clone-project"', 1)[1].split("</dialog>", 1)[0]
+    assert 'action="/api/projects/clone"' in clone_dialog
+    assert " disabled>Klonen</button>" in clone_dialog
+
+
 def test_clone_project_api_runs_helper_and_reports_visible_project(monkeypatch, tmp_path) -> None:
     project_root = tmp_path / "opt/www"
     enabled_root = tmp_path / "etc/nginx/sites-enabled"

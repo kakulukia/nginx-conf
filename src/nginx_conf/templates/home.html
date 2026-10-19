@@ -1,10 +1,22 @@
 {% extends "base.html" %}
-{% block account %}<form action="/api/logout" method="post"><button class="nc-button nc-button--quiet" type="submit">Abmelden</button></form>{% endblock %}
+{% block account %}
+<div class="app-menu" id="app-menu">
+  <button class="nc-button nc-button--quiet nc-button--icon" type="button" id="app-menu-trigger" aria-label="Menü öffnen" title="Menü" aria-expanded="false" aria-controls="app-menu-panel">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+  </button>
+  <div class="app-menu__panel" id="app-menu-panel" hidden>
+    <a class="nc-button nc-button--quiet" href="/styleguide">Styleguide</a>
+    <form action="/api/nginx/reload" method="post" data-app-action data-error-target="app-action-error"><button class="nc-button" type="submit"{% if active_action %} disabled{% endif %}>Nginx neu laden</button></form>
+    <form action="/api/nginx/test" method="post" data-app-action data-error-target="app-action-error"><button class="nc-button" type="submit" title="nginx -t"{% if active_action %} disabled{% endif %}>Nginx testen</button></form>
+    <button class="nc-button" type="button" id="open-clone"{% if active_action %} disabled{% endif %}>Projekt klonen</button>
+    <form class="app-menu__logout" action="/api/logout" method="post"><button class="nc-button nc-button--quiet" type="submit">Abmelden</button></form>
+  </div>
+</div>
+{% endblock %}
 {% block navigation %}
 <nav class="nc-nav" aria-label="Hauptnavigation">
   <a href="/"{% if log_sections is not defined %} aria-current="page"{% endif %}>Projekte</a>
   <a href="/logs"{% if log_sections is defined %} aria-current="page"{% endif %}>Logs</a>
-  <a href="/styleguide">Styleguide</a>
 </nav>
 {% endblock %}
 {% block content %}
@@ -15,6 +27,7 @@
           {% if line.startswith('-') and not line.startswith('---') %}{% set diff_count.removed = diff_count.removed + 1 %}{% endif %}
         {% endfor %}
       {% endif %}
+      {% if request.url.path != '/' %}
       <div class="app-title">
         <h1 class="nc-display">{{ title }}</h1>
         {% if config is defined %}
@@ -25,6 +38,8 @@
           </nav>
         {% endif %}
       </div>
+      {% endif %}
+      <p class="nc-error" id="app-action-error" role="alert" hidden></p>
       {% if active_action %}
         <div class="nc-banner" role="status">
           <strong class="nc-banner__title">Aktion läuft: {{ active_action.action_type }}</strong>
@@ -51,23 +66,20 @@
           </div>
         </form>
       {% endif %}
-      <div class="app-actions">
-        <form action="/api/nginx/test" method="post">
-          <button class="nc-button" type="submit"{% if active_action %} disabled{% endif %}>nginx -t</button>
-        </form>
-        <form action="/api/nginx/reload" method="post">
-          <button class="nc-button" type="submit"{% if active_action %} disabled{% endif %}>Reload Nginx</button>
-        </form>
-      </div>
-      {% if inventory is defined %}
-        <section class="app-section">
-          <h2 class="nc-heading">Projekt klonen</h2>
-          <form class="app-inline-form" action="/api/projects/clone" method="post">
+      <dialog class="nc-dialog" id="clone-project" aria-labelledby="clone-project-title" aria-describedby="clone-project-note">
+          <h2 class="nc-heading" id="clone-project-title">Projekt klonen</h2>
+          <p class="nc-text" id="clone-project-note">GitHub-Repository angeben. Das Projekt wird unter /opt/www angelegt.</p>
+          <form class="nc-form" action="/api/projects/clone" method="post" data-app-action data-error-target="clone-error">
             <div class="app-field"><label class="nc-label" for="clone-url">GitHub-Repository</label>
-            <input class="nc-input" id="clone-url" type="text" name="clone_url" placeholder="https://github.com/owner/repo.git" required></div>
-            <button class="nc-button" type="submit"{% if active_action %} disabled{% endif %}>Klonen</button>
+            <input class="nc-input" id="clone-url" type="text" name="clone_url" placeholder="https://github.com/owner/repo.git" aria-describedby="clone-project-note clone-error" required autofocus></div>
+            <p class="nc-error" id="clone-error" role="alert" hidden></p>
+            <div class="nc-dialog__actions">
+              <button class="nc-button nc-button--quiet" type="button" id="cancel-clone">Abbrechen</button>
+              <button class="nc-button nc-button--save" type="submit"{% if active_action %} disabled{% endif %}>Klonen</button>
+            </div>
           </form>
-        </section>
+      </dialog>
+      {% if inventory is defined %}
         {% if inventory.projects %}
           {% for project in inventory.projects %}
             <section class="app-section">
@@ -459,6 +471,89 @@
       {% endif %}
 {% endblock %}
 {% block scripts %}
+  <script>
+    const menu = document.getElementById('app-menu');
+    const menuTrigger = document.getElementById('app-menu-trigger');
+    const menuPanel = document.getElementById('app-menu-panel');
+    const cloneDialog = document.getElementById('clone-project');
+    const cloneForm = cloneDialog.querySelector('form');
+    const cloneUrl = document.getElementById('clone-url');
+    const cancelClone = document.getElementById('cancel-clone');
+    function setMenuOpen(open) {
+      menuPanel.hidden = !open;
+      menuTrigger.setAttribute('aria-expanded', String(open));
+    }
+    menu.addEventListener('mouseenter', () => setMenuOpen(true));
+    menu.addEventListener('mouseleave', () => {
+      if (!menuPanel.contains(document.activeElement)) setMenuOpen(false);
+    });
+    menuTrigger.addEventListener('click', () => {
+      setMenuOpen(true);
+      menuPanel.querySelector('a').focus();
+    });
+    menu.addEventListener('focusout', (event) => {
+      if (!menu.contains(event.relatedTarget)) setMenuOpen(false);
+    });
+    menu.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        setMenuOpen(false);
+        menuTrigger.focus();
+      }
+    });
+    document.addEventListener('click', (event) => {
+      if (!menu.contains(event.target)) setMenuOpen(false);
+    });
+    document.getElementById('open-clone').addEventListener('click', () => {
+      setMenuOpen(false);
+      cloneDialog.showModal();
+    });
+    cancelClone.addEventListener('click', () => cloneDialog.close());
+    cloneDialog.addEventListener('close', () => menuTrigger.focus());
+    cloneDialog.addEventListener('cancel', (event) => {
+      if (cloneForm.getAttribute('aria-busy') === 'true') event.preventDefault();
+    });
+    cloneUrl.addEventListener('input', () => {
+      cloneUrl.removeAttribute('aria-invalid');
+      document.getElementById('clone-error').hidden = true;
+    });
+    document.querySelectorAll('[data-app-action]').forEach((form) => {
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (form.getAttribute('aria-busy') === 'true') return;
+        const error = document.getElementById(form.dataset.errorTarget);
+        const submit = form.querySelector('[type="submit"]');
+        const label = submit.textContent;
+        error.hidden = true;
+        form.setAttribute('aria-busy', 'true');
+        submit.disabled = true;
+        submit.textContent = 'Wird ausgeführt…';
+        if (form === cloneForm) cancelClone.disabled = true;
+        setMenuOpen(false);
+        try {
+          const response = await fetch(form.action, {method: 'POST', body: new FormData(form), headers: {'Accept': 'application/json'}});
+          if (response.status === 401) {
+            window.location.assign('/login');
+            return;
+          }
+          const result = await response.json().catch(() => null);
+          if (!response.ok || !result) {
+            if (form === cloneForm && response.status === 400) cloneUrl.setAttribute('aria-invalid', 'true');
+            throw new Error(typeof result?.detail === 'string' ? result.detail : 'Die Aktion konnte nicht abgeschlossen werden. Bitte erneut versuchen.');
+          }
+          window.location.reload();
+        } catch (failure) {
+          error.textContent = failure instanceof TypeError ? 'Keine Verbindung zum Server. Bitte erneut versuchen.' : failure.message;
+          error.hidden = false;
+          if (form === cloneForm) cloneUrl.focus();
+        } finally {
+          form.removeAttribute('aria-busy');
+          submit.disabled = false;
+          submit.textContent = label;
+          if (form === cloneForm) cancelClone.disabled = false;
+        }
+      });
+    });
+  </script>
   {% if config is defined and git_status and git_status.commit_required %}
     <script>
       const resetDialog = document.getElementById('reset-config');
