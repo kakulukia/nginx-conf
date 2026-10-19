@@ -127,21 +127,31 @@ fuer den Host-Nginx sichtbar.
 ## Passwort und TOTP
 
 Die Anwendung hat genau einen Zugang ohne Nutzernamen. Ein Web-Setup und
-Login-Tokens entfallen. Bei der Installation einmalig im Terminal ausführen:
+Login-Tokens entfallen. Bei der Installation ein vorläufiges Installationspasswort
+festlegen. Dafür einmalig im Terminal ausführen:
 
 ```bash
 sudo -u nginx-config /opt/nginx-conf/.venv/bin/python -I /opt/nginx-conf/scripts/nginx-conf-auth
 ```
 
-Der Befehl fragt ausschließlich das Passwort zweimal verdeckt ab und speichert
+Der Befehl fragt ausschließlich das Installationspasswort zweimal verdeckt ab und speichert
 es als Argon2id-Hash. Das Passwort hat mindestens 12 Zeichen. Keine Passwörter
 oder TOTP-Geheimnisse als Kommandozeilenargumente übergeben.
 
-Anschließend `https://config.pepperz.de/login` öffnen und das Passwort eingeben.
-Beim ersten Login erscheint der QR-Code für die Authenticator-App. Scannen
+Anschließend `https://config.pepperz.de/login` öffnen und das Installationspasswort
+eingeben. Im Dialog „Setze dein Passwort“ ein eigenes Passwort zweimal eingeben.
+Es muss mindestens 12 Zeichen lang sein und sich vom Installationspasswort
+unterscheiden. Die App ersetzt den bisherigen Hash durch den Argon2id-Hash
+des neuen Passworts. Das Installationspasswort ist ab diesem Moment ungültig.
+Es gibt keine separate Passwortdatei; die Datenbank liegt unter
+`/opt/nginx-config/nginx-conf.sqlite3`.
+
+Danach erscheint der QR-Code für die Authenticator-App. Scannen
 oder den Schlüssel manuell eintragen und den aktuellen Code bestätigen.
-Erst danach ist die App zugänglich. Die Einrichtung läuft nach zehn Minuten
-ab; dann erneut mit dem Passwort beginnen. QR-Code und Schlüssel werden
+Erst danach ist die App zugänglich. Die vorläufige Berechtigung für Passwortwechsel
+und Authenticator-Einrichtung läuft insgesamt nach zehn Minuten ab. Dann erneut
+mit dem aktuell gültigen Passwort beginnen. Ein bereits gesetztes eigenes Passwort
+bleibt erhalten. QR-Code und Schlüssel werden
 vollständig auf dem Server erzeugt und nicht an einen QR-Dienst übertragen.
 Bei späteren Anmeldungen Passwort und aktuellen TOTP-Code eingeben.
 
@@ -155,9 +165,9 @@ TOTP-Code ist nur einmal nutzbar. HTTPS-Sessions haben Secure-, HttpOnly- und
 SameSite-Lax-Cookies und laufen nach 30 Tagen ab. Abmelden invalidiert die Session.
 
 Bei verlorenem Passwort oder Authenticator den gleichen Installationsbefehl
-mit `--replace` ausführen. Das setzt ein neues Passwort, entfernt den bisherigen Authenticator und meldet
+mit `--replace` ausführen. Das setzt ein neues Installationspasswort, entfernt den bisherigen Authenticator und meldet
 alle bestehenden Sessions ab. Auch laufende Einrichtungen werden ungültig.
-Beim nächsten Login den Authenticator erneut im Browser einrichten.
+Beim nächsten Login ein eigenes Passwort setzen und den Authenticator erneut im Browser einrichten.
 Im Browser gibt es keinen Weg zum Zurücksetzen.
 
 Beim Update vom bisherigen Modell werden alte Nutzer, Token-Sessions und

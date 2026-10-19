@@ -30,13 +30,18 @@ class AuthError(ValueError):
 @dataclass(frozen=True)
 class EnrollmentRequired:
     token: str
+    password_change_required: bool = False
 
 
 def configure_password(db: AppDatabase, *, password: str, replace: bool = False) -> None:
     if not 12 <= len(password) <= 1024:
         raise AuthError("Das Passwort muss zwischen 12 und 1024 Zeichen lang sein.")
     db.save_auth_credentials(
-        password_hash=PASSWORD_HASHER.hash(password), totp_secret="", last_totp_step=-1, replace=replace
+        password_hash=PASSWORD_HASHER.hash(password),
+        totp_secret="",
+        last_totp_step=-1,
+        replace=replace,
+        password_change_required=True,
     )
 
 
@@ -72,7 +77,7 @@ def login(db: AppDatabase, *, password: str, code: str, now: int | None = None) 
             now=now,
         ):
             raise AuthError(LOGIN_ERROR)
-        return EnrollmentRequired(token)
+        return EnrollmentRequired(token, credentials.password_change_required)
     step = matching_totp_step(credentials.totp_secret, code, now=now)
     if step is None:
         raise AuthError(LOGIN_ERROR)
@@ -87,6 +92,39 @@ def enrollment_secret(db: AppDatabase, token: str | None, *, now: int | None = N
     if not token:
         return None
     return db.get_enrollment_secret(_hash_token(token), now=int(time.time() if now is None else now))
+
+
+def password_change_required(db: AppDatabase, token: str | None, *, now: int | None = None) -> bool:
+    return bool(token and db.get_password_change_hash(_hash_token(token), now=int(time.time() if now is None else now)))
+
+
+def set_initial_password(
+    db: AppDatabase, *, token: str | None, password: str, confirmation: str, now: int | None = None
+) -> str:
+    now = int(time.time() if now is None else now)
+    old_hash = db.get_password_change_hash(_hash_token(token), now=now) if token else None
+    if old_hash is None:
+        raise AuthError("Die Einrichtung ist abgelaufen. Bitte erneut mit deinem Passwort anmelden.")
+    if not 12 <= len(password) <= 1024:
+        raise AuthError("Das Passwort muss zwischen 12 und 1024 Zeichen lang sein.")
+    if password != confirmation:
+        raise AuthError("Die Passwörter stimmen nicht überein.")
+    try:
+        PASSWORD_HASHER.verify(old_hash, password)
+    except VerificationError, InvalidHashError:
+        pass
+    else:
+        raise AuthError("Bitte ein anderes Passwort als das Installationspasswort wählen.")
+    next_token = secrets.token_urlsafe(32)
+    if not db.complete_password_change(
+        token_hash=_hash_token(token),
+        password_hash=old_hash,
+        new_password_hash=PASSWORD_HASHER.hash(password),
+        new_token_hash=_hash_token(next_token),
+        now=now,
+    ):
+        raise AuthError("Die Einrichtung ist abgelaufen. Bitte erneut mit deinem Passwort anmelden.")
+    return next_token
 
 
 def confirm_enrollment(db: AppDatabase, *, token: str | None, code: str, now: int | None = None) -> str:
@@ -129,7 +167,7 @@ def configure_access_cli() -> int:
     import sys
     from pathlib import Path
 
-    parser = argparse.ArgumentParser(description="Passwort für nginx-conf festlegen")
+    parser = argparse.ArgumentParser(description="Vorläufiges Installationspasswort für nginx-conf festlegen")
     parser.add_argument("--database", type=Path, default=AppDatabase().path)
     parser.add_argument("--replace", action="store_true", help="Zugang ersetzen und alle Sessions abmelden")
     args = parser.parse_args()
@@ -139,7 +177,7 @@ def configure_access_cli() -> int:
     db.initialize()
     if db.get_auth_credentials() and not args.replace:
         parser.exit(1, "Zugang bereits eingerichtet. Zum Ersetzen --replace verwenden.\n")
-    password = getpass.getpass("Passwort: ")
+    password = getpass.getpass("Installationspasswort: ")
     if not 12 <= len(password) <= 1024:
         parser.exit(1, "Das Passwort muss zwischen 12 und 1024 Zeichen lang sein.\n")
     if password != getpass.getpass("Passwort wiederholen: "):
@@ -148,7 +186,7 @@ def configure_access_cli() -> int:
         configure_password(db, password=password, replace=args.replace)
     except ValueError as error:
         parser.exit(1, f"{error}\n")
-    print("Passwort gespeichert. Beim ersten Login im Browser den Authenticator einrichten.")
+    print("Passwort gespeichert. Beim ersten Login ein eigenes Passwort setzen und den Authenticator einrichten.")
     return 0
 
 

@@ -35,6 +35,7 @@ def test_installation_sets_only_password_and_rejects_accidental_replacement(tmp_
     assert PASSWORD not in credentials.password_hash
     assert auth.PASSWORD_HASHER.verify(credentials.password_hash, PASSWORD)
     assert credentials.totp_secret == ""
+    assert credentials.password_change_required
     assert db.path.stat().st_mode & 0o777 == 0o600
     with pytest.raises(ValueError, match="bereits eingerichtet"):
         auth.configure_password(db, password=PASSWORD)
@@ -139,8 +140,141 @@ def test_installation_cli_only_asks_for_password(monkeypatch, tmp_path: Path, ca
 def pending_db(tmp_path: Path) -> AppDatabase:
     database = AppDatabase(tmp_path / "pending.sqlite3")
     database.initialize()
-    auth.configure_password(database, password=PASSWORD)
+    database.save_auth_credentials(password_hash=auth.PASSWORD_HASHER.hash(PASSWORD), totp_secret="", last_totp_step=-1)
     return database
+
+
+def test_installation_requires_new_password_before_totp_or_app_access(tmp_path: Path) -> None:
+    database = AppDatabase(tmp_path / "initial.sqlite3")
+    database.initialize()
+    auth.configure_password(database, password=PASSWORD)
+    pending = auth.login(database, password=PASSWORD, code="", now=NOW)
+    other = auth.login(database, password=PASSWORD, code="", now=NOW)
+    assert pending.password_change_required
+    assert auth.enrollment_secret(database, pending.token, now=NOW) is None
+    assert not auth.session_valid(database, pending.token)
+    assert not database.complete_enrollment(
+        token_hash=auth._hash_token(pending.token),
+        now=NOW,
+        totp_step=NOW // 30,
+        session_hash="bypass",
+        expires_at="9999-01-01T00:00:00+00:00",
+    )
+    assert not database.complete_login(
+        database.get_auth_credentials(),
+        totp_step=NOW // 30,
+        session_hash="bypass",
+        expires_at="9999-01-01T00:00:00+00:00",
+    )
+    new_password = "my-new-local-password"
+    token = auth.set_initial_password(
+        database, token=pending.token, password=new_password, confirmation=new_password, now=NOW
+    )
+    credentials = database.get_auth_credentials()
+    assert auth.PASSWORD_HASHER.verify(credentials.password_hash, new_password)
+    assert new_password not in credentials.password_hash and not credentials.password_change_required
+    assert not auth.password_change_required(database, pending.token, now=NOW)
+    assert auth.enrollment_secret(database, other.token, now=NOW) is None
+    assert auth.enrollment_secret(database, pending.token, now=NOW) is None
+    with pytest.raises(auth.AuthError):
+        auth.set_initial_password(
+            database,
+            token=pending.token,
+            password="another-local-password",
+            confirmation="another-local-password",
+            now=NOW,
+        )
+    secret = auth.enrollment_secret(database, token, now=NOW)
+    assert secret and not auth.session_valid(database, token)
+    assert auth.enrollment_secret(database, token, now=NOW + 600) is None
+    with pytest.raises(auth.AuthError):
+        auth.login(database, password=PASSWORD, code="", now=NOW)
+    resumed = auth.login(database, password=new_password, code="", now=NOW)
+    assert not resumed.password_change_required
+    session = auth.confirm_enrollment(database, token=token, code=pyotp.TOTP(secret).at(NOW), now=NOW)
+    assert database.session_valid(auth._hash_token(session), now="2023-11-14T22:13:21+00:00")
+
+
+@pytest.mark.parametrize(
+    "password,confirmation",
+    [
+        ("", ""),
+        ("short", "short"),
+        ("x" * 1025, "x" * 1025),
+        (PASSWORD, PASSWORD),
+        ("new-local-password", "other-password"),
+    ],
+)
+def test_invalid_initial_password_does_not_change_credentials(tmp_path: Path, password: str, confirmation: str) -> None:
+    database = AppDatabase(tmp_path / "initial.sqlite3")
+    database.initialize()
+    auth.configure_password(database, password=PASSWORD)
+    before = database.get_auth_credentials()
+    pending = auth.login(database, password=PASSWORD, code="", now=NOW)
+    with pytest.raises(auth.AuthError):
+        auth.set_initial_password(database, token=pending.token, password=password, confirmation=confirmation, now=NOW)
+    assert database.get_auth_credentials() == before
+    assert auth.password_change_required(database, pending.token, now=NOW)
+
+
+def test_initial_password_requires_unexpired_proof_and_cannot_be_reused(tmp_path: Path) -> None:
+    database = AppDatabase(tmp_path / "initial.sqlite3")
+    database.initialize()
+    auth.configure_password(database, password=PASSWORD)
+    pending = auth.login(database, password=PASSWORD, code="", now=NOW)
+    for token, now in ((None, NOW), ("unknown", NOW), (pending.token, NOW + 600)):
+        with pytest.raises(auth.AuthError):
+            auth.set_initial_password(
+                database, token=token, password="new-local-password", confirmation="new-local-password", now=now
+            )
+    assert database.get_auth_credentials().password_change_required
+    auth.configure_password(database, password=PASSWORD, replace=True)
+    with pytest.raises(auth.AuthError):
+        auth.set_initial_password(
+            database, token=pending.token, password="new-local-password", confirmation="new-local-password", now=NOW
+        )
+
+
+def test_only_one_concurrent_initial_password_change_succeeds(tmp_path: Path) -> None:
+    database = AppDatabase(tmp_path / "initial.sqlite3")
+    database.initialize()
+    auth.configure_password(database, password=PASSWORD)
+    pending = [auth.login(database, password=PASSWORD, code="", now=NOW) for _ in range(2)]
+
+    def change(index: int) -> bool:
+        password = f"new-local-password-{index}"
+        try:
+            auth.set_initial_password(
+                database, token=pending[index].token, password=password, confirmation=password, now=NOW
+            )
+            return True
+        except auth.AuthError:
+            return False
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(change, range(2))) == [False, True]
+
+
+@pytest.mark.parametrize("secret", [SECRET, ""])
+def test_existing_credentials_survive_password_change_schema_migration(tmp_path: Path, secret: str) -> None:
+    path = tmp_path / "old.sqlite3"
+    password_hash = auth.PASSWORD_HASHER.hash(PASSWORD)
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "create table auth_credentials (id integer primary key, password_hash text, totp_secret text, last_totp_step integer, attempts integer, blocked_until integer)"
+        )
+        connection.execute("insert into auth_credentials values (1, ?, ?, 0, 0, 0)", (password_hash, secret))
+    database = AppDatabase(path)
+    database.initialize()
+    database.initialize()
+    credentials = database.get_auth_credentials()
+    assert credentials.password_hash == password_hash and credentials.totp_secret == secret
+    assert credentials.password_change_required is (not secret)
+    result = auth.login(database, password=PASSWORD, code=pyotp.TOTP(SECRET).at(NOW), now=NOW)
+    if secret:
+        assert isinstance(result, str)
+    else:
+        assert result.password_change_required
 
 
 def test_password_only_grants_enrollment_not_app_access(pending_db: AppDatabase) -> None:

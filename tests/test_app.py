@@ -1454,12 +1454,37 @@ def test_first_login_enrolls_authenticator_before_granting_app_access(monkeypatc
     assert 'name="totp_code"' not in browser.get("/login").text
     assert browser.post("/api/login", data={"password": "wrong"}).status_code == 401
     response = browser.post("/api/login", data={"password": password}, headers={"Origin": "https://config.pepperz.de"})
-    assert response.status_code == 303 and response.headers["location"] == "/login/authenticator"
+    assert response.status_code == 303 and response.headers["location"] == "/login/password"
     assert SESSION_COOKIE_NAME not in browser.cookies
     cookie = response.headers["set-cookie"]
     assert "Secure" in cookie and "HttpOnly" in cookie and "SameSite=strict" in cookie and "Max-Age=600" in cookie
     assert browser.get("/").headers["location"] == "/login"
     assert browser.get("/api/projects").status_code == 401
+    proof = browser.cookies.get(auth.ENROLLMENT_COOKIE_NAME)
+    assert auth.enrollment_secret(db, proof) is None
+    assert browser.get("/login/authenticator").headers["location"] == "/login/password"
+    assert (
+        browser.post("/api/login/authenticator", data={"totp_code": "123456"}).headers["location"] == "/login/password"
+    )
+    page = browser.get("/login/password")
+    assert page.status_code == 200 and "Setze dein Passwort" in page.text
+    assert page.headers["cache-control"] == "no-store" and page.headers["referrer-policy"] == "same-origin"
+    new_password = "my-new-local-password"
+    data = {"password": new_password, "password_confirmation": new_password}
+    assert (
+        browser.post("/api/login/password", data=data, headers={"Origin": "https://foreign.example"}).status_code == 403
+    )
+    invalid = browser.post("/api/login/password", data={"password": new_password, "password_confirmation": "other"})
+    assert invalid.status_code == 400 and "stimmen nicht überein" in invalid.text
+    assert new_password not in invalid.text
+    response = browser.post("/api/login/password", data=data)
+    assert response.status_code == 303 and response.headers["location"] == "/login/authenticator"
+    assert SESSION_COOKIE_NAME not in browser.cookies
+    assert browser.cookies.get(auth.ENROLLMENT_COOKIE_NAME) != proof
+    assert browser.get("/api/projects").status_code == 401
+    assert not db.get_auth_credentials().password_change_required
+    assert auth.PASSWORD_HASHER.verify(db.get_auth_credentials().password_hash, new_password)
+    assert auth.enrollment_secret(db, proof) is None
     proof = browser.cookies.get(auth.ENROLLMENT_COOKIE_NAME)
     secret = auth.enrollment_secret(db, proof)
     page = browser.get("/login/authenticator")
@@ -1492,7 +1517,22 @@ def test_first_login_enrolls_authenticator_before_granting_app_access(monkeypatc
     assert "<svg" not in browser.get("/login/authenticator").text
     browser.post("/api/logout")
     assert 'name="totp_code"' in browser.get("/login").text
-    assert browser.post("/api/login", data={"password": password}).status_code == 401
+    assert browser.post("/api/login", data={"password": new_password}).status_code == 401
+
+
+def test_initial_password_page_and_submit_require_password_proof(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "auth.sqlite3")
+    db = main.get_database()
+    configure_password(db, password="local-test-password")
+    browser = TestClient(main.app, follow_redirects=False)
+    assert browser.get("/login/password").status_code == 401
+    assert (
+        browser.post(
+            "/api/login/password", data={"password": "my-new-password", "password_confirmation": "my-new-password"}
+        ).status_code
+        == 401
+    )
+    assert db.get_auth_credentials().password_change_required
 
 
 def test_expired_enrollment_returns_to_password_login(monkeypatch, tmp_path) -> None:

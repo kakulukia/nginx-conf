@@ -16,7 +16,9 @@ from nginx_conf.auth import (
     enrollment_secret,
     login,
     logout,
+    password_change_required,
     session_valid,
+    set_initial_password,
 )
 from nginx_conf.certbot_renewal import (
     certbot_renewal_status_to_dict,
@@ -90,6 +92,8 @@ PUBLIC_PATHS = {
     "/health",
     "/login",
     "/api/login",
+    "/login/password",
+    "/api/login/password",
     "/login/authenticator",
     "/api/login/authenticator",
     "/static/app.css",
@@ -181,6 +185,7 @@ def _login_form(request: Request, *, error: str | None = None, status_code: int 
             "title": "Anmelden",
             "configured": credentials is not None,
             "totp_configured": bool(credentials and credentials.totp_secret),
+            "password_change_required": bool(credentials and credentials.password_change_required),
             "error": error,
         },
         status_code=status_code,
@@ -210,20 +215,20 @@ async def login_api(request: Request) -> Response:
             return response
         return JSONResponse({"ok": False, "detail": str(error)}, status_code=status, headers=headers)
     if isinstance(token, EnrollmentRequired):
+        next_page = "/login/password" if token.password_change_required else "/login/authenticator"
         response = (
-            JSONResponse({"ok": True, "enrollment_required": True, "next": "/login/authenticator"})
+            JSONResponse(
+                {
+                    "ok": True,
+                    "enrollment_required": True,
+                    "password_change_required": token.password_change_required,
+                    "next": next_page,
+                }
+            )
             if "application/json" in request.headers.get("content-type", "")
-            else RedirectResponse("/login/authenticator", status_code=303)
+            else RedirectResponse(next_page, status_code=303)
         )
-        response.set_cookie(
-            ENROLLMENT_COOKIE_NAME,
-            token.token,
-            httponly=True,
-            secure=request.url.scheme == "https",
-            samesite="strict",
-            max_age=ENROLLMENT_TTL_SECONDS,
-            path="/",
-        )
+        _set_enrollment_cookie(response, token.token, secure=request.url.scheme == "https")
         return response
     response = (
         JSONResponse({"ok": True})
@@ -235,12 +240,66 @@ async def login_api(request: Request) -> Response:
     return response
 
 
+def _set_enrollment_cookie(response: Response, token: str, *, secure: bool) -> None:
+    response.set_cookie(
+        ENROLLMENT_COOKIE_NAME,
+        token,
+        httponly=True,
+        secure=secure,
+        samesite="strict",
+        max_age=ENROLLMENT_TTL_SECONDS,
+        path="/",
+    )
+
+
+def _password_form(request: Request, *, error: str | None = None, status_code: int = 200) -> Response:
+    db = get_database()
+    token = request.cookies.get(ENROLLMENT_COOKIE_NAME)
+    if not password_change_required(db, token):
+        if enrollment_secret(db, token) is not None:
+            return RedirectResponse("/login/authenticator", status_code=303)
+        response = _login_form(
+            request, error="Die Einrichtung ist abgelaufen. Bitte erneut mit deinem Passwort anmelden.", status_code=401
+        )
+        response.delete_cookie(ENROLLMENT_COOKIE_NAME)
+        return response
+    return templates.TemplateResponse(
+        request, "initial_password.html", {"title": "Setze dein Passwort", "error": error}, status_code=status_code
+    )
+
+
+@app.get("/login/password", response_class=HTMLResponse)
+def initial_password_page(request: Request) -> Response:
+    return _password_form(request)
+
+
+@app.post("/api/login/password")
+async def initial_password_api(request: Request) -> Response:
+    try:
+        payload = await _request_payload(request)
+        token = set_initial_password(
+            get_database(),
+            token=request.cookies.get(ENROLLMENT_COOKIE_NAME),
+            password=str(payload.get("password") or ""),
+            confirmation=str(payload.get("password_confirmation") or ""),
+        )
+    except ValueError as error:
+        return _password_form(request, error=str(error), status_code=400)
+    response = RedirectResponse("/login/authenticator", status_code=303)
+    _set_enrollment_cookie(response, token, secure=request.url.scheme == "https")
+    return response
+
+
 def _enrollment_form(request: Request, *, error: str | None = None, status_code: int = 200) -> Response:
     import pyotp
     import qrcode
     from qrcode.image.svg import SvgPathImage
 
-    secret = enrollment_secret(get_database(), request.cookies.get(ENROLLMENT_COOKIE_NAME))
+    db = get_database()
+    token = request.cookies.get(ENROLLMENT_COOKIE_NAME)
+    if password_change_required(db, token):
+        return RedirectResponse("/login/password", status_code=303)
+    secret = enrollment_secret(db, token)
     if secret is None:
         response = _login_form(
             request, error="Die Einrichtung ist abgelaufen. Bitte erneut mit deinem Passwort anmelden.", status_code=401

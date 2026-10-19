@@ -112,6 +112,7 @@ class ManagedPM2Process:
 class AuthCredentials:
     password_hash: str
     totp_secret: str
+    password_change_required: bool = False
 
 
 def default_database_path(data_dir: Path = DATA_DIR) -> Path:
@@ -131,6 +132,14 @@ class AppDatabase:
         self.path.chmod(0o600)
         with self._connect() as connection:
             connection.executescript(SCHEMA)
+            connection.execute("begin immediate")
+            columns = {row[1] for row in connection.execute("pragma table_info(auth_credentials)")}
+            if "password_change_required" not in columns:
+                connection.execute(
+                    "alter table auth_credentials add column password_change_required integer not null default 0 "
+                    "check (password_change_required in (0, 1))"
+                )
+                connection.execute("update auth_credentials set password_change_required = 1 where totp_secret = ''")
             connection.execute("drop table if exists sessions")
             connection.execute("drop table if exists users")
             connection.execute("delete from ui_state where key in ('auth.setup_token', 'auth.login_token')")
@@ -389,11 +398,21 @@ class AppDatabase:
 
     def get_auth_credentials(self) -> AuthCredentials | None:
         with self._connect() as connection:
-            row = connection.execute("select password_hash, totp_secret from auth_credentials where id = 1").fetchone()
-        return AuthCredentials(row["password_hash"], row["totp_secret"]) if row else None
+            row = connection.execute("select * from auth_credentials where id = 1").fetchone()
+        return (
+            AuthCredentials(row["password_hash"], row["totp_secret"], bool(row["password_change_required"]))
+            if row
+            else None
+        )
 
     def save_auth_credentials(
-        self, *, password_hash: str, totp_secret: str, last_totp_step: int, replace: bool = False
+        self,
+        *,
+        password_hash: str,
+        totp_secret: str,
+        last_totp_step: int,
+        replace: bool = False,
+        password_change_required: bool = False,
     ) -> None:
         with self._connect() as connection:
             connection.execute("begin immediate")
@@ -401,9 +420,9 @@ class AppDatabase:
                 raise ValueError("Zugang bereits eingerichtet. Zum Ersetzen --replace verwenden.")
             connection.execute(
                 """insert or replace into auth_credentials
-                   (id, password_hash, totp_secret, last_totp_step, attempts, blocked_until)
-                   values (1, ?, ?, ?, 0, 0)""",
-                (password_hash, totp_secret, last_totp_step),
+                   (id, password_hash, totp_secret, last_totp_step, attempts, blocked_until, password_change_required)
+                   values (1, ?, ?, ?, 0, 0, ?)""",
+                (password_hash, totp_secret, last_totp_step, password_change_required),
             )
             connection.execute("delete from auth_sessions")
             connection.execute("delete from auth_enrollments")
@@ -425,10 +444,46 @@ class AppDatabase:
             row = connection.execute(
                 """select e.secret from auth_enrollments e join auth_credentials c
                    on c.id = 1 and c.password_hash = e.password_hash and c.totp_secret = ''
-                   where e.token_hash = ? and e.expires_at > ?""",
+                   where e.token_hash = ? and e.expires_at > ? and c.password_change_required = 0""",
                 (token_hash, now),
             ).fetchone()
         return row["secret"] if row else None
+
+    def get_password_change_hash(self, token_hash: str, *, now: int) -> str | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """select c.password_hash from auth_enrollments e join auth_credentials c
+                   on c.id = 1 and c.password_hash = e.password_hash and c.totp_secret = ''
+                   where e.token_hash = ? and e.expires_at > ? and c.password_change_required = 1""",
+                (token_hash, now),
+            ).fetchone()
+        return row["password_hash"] if row else None
+
+    def complete_password_change(
+        self, *, token_hash: str, password_hash: str, new_password_hash: str, new_token_hash: str, now: int
+    ) -> bool:
+        with self._connect() as connection:
+            connection.execute("begin immediate")
+            row = connection.execute(
+                "select secret, expires_at from auth_enrollments where token_hash = ? and password_hash = ? and expires_at > ?",
+                (token_hash, password_hash, now),
+            ).fetchone()
+            if row is None:
+                return False
+            result = connection.execute(
+                """update auth_credentials set password_hash = ?, password_change_required = 0
+                   where id = 1 and password_hash = ? and totp_secret = '' and password_change_required = 1""",
+                (new_password_hash, password_hash),
+            )
+            if result.rowcount != 1:
+                return False
+            connection.execute("delete from auth_sessions")
+            connection.execute("delete from auth_enrollments")
+            connection.execute(
+                "insert into auth_enrollments (token_hash, password_hash, secret, expires_at) values (?, ?, ?, ?)",
+                (new_token_hash, new_password_hash, row["secret"], row["expires_at"]),
+            )
+        return True
 
     def complete_enrollment(
         self, *, token_hash: str, now: int, totp_step: int, session_hash: str, expires_at: str
@@ -442,7 +497,7 @@ class AppDatabase:
                 return False
             result = connection.execute(
                 """update auth_credentials set totp_secret = ?, last_totp_step = ?, attempts = 0, blocked_until = 0
-                   where id = 1 and password_hash = ? and totp_secret = ''""",
+                   where id = 1 and password_hash = ? and totp_secret = '' and password_change_required = 0""",
                 (row["secret"], totp_step, row["password_hash"]),
             )
             if result.rowcount != 1:
@@ -468,7 +523,7 @@ class AppDatabase:
                 "update auth_credentials set attempts = ?, blocked_until = ? where id = 1",
                 (attempts, blocked_until),
             )
-        return AuthCredentials(row["password_hash"], row["totp_secret"])
+        return AuthCredentials(row["password_hash"], row["totp_secret"], bool(row["password_change_required"]))
 
     def complete_login(
         self, credentials: AuthCredentials, *, totp_step: int, session_hash: str, expires_at: str
@@ -478,7 +533,8 @@ class AppDatabase:
             connection.execute("begin immediate")
             result = connection.execute(
                 """update auth_credentials set last_totp_step = ?, attempts = 0, blocked_until = 0
-                   where id = 1 and password_hash = ? and totp_secret = ? and last_totp_step < ?""",
+                   where id = 1 and password_hash = ? and totp_secret = ? and last_totp_step < ?
+                   and password_change_required = 0""",
                 (totp_step, credentials.password_hash, credentials.totp_secret, totp_step),
             )
             if result.rowcount != 1:
@@ -789,7 +845,8 @@ create table if not exists auth_credentials (
     totp_secret text not null,
     last_totp_step integer not null,
     attempts integer not null default 0,
-    blocked_until integer not null default 0
+    blocked_until integer not null default 0,
+    password_change_required integer not null default 0 check (password_change_required in (0, 1))
 );
 
 create table if not exists auth_sessions (

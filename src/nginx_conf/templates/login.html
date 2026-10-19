@@ -5,7 +5,7 @@
 {% block content %}
   <div class="app-title">
     <h1 class="nc-display">Anmelden</h1>
-    <p class="nc-text">{% if totp_configured %}Passwort und aktuellen Code aus deiner Authenticator-App eingeben.{% else %}Mit deinem Passwort anmelden. Anschließend richtest du deinen Authenticator ein.{% endif %}</p>
+    <p class="nc-text">{% if totp_configured %}Passwort und aktuellen Code aus deiner Authenticator-App eingeben.{% elif password_change_required %}Mit dem Installationspasswort anmelden. Anschließend setzt du dein eigenes Passwort und richtest deinen Authenticator ein.{% else %}Mit deinem Passwort anmelden. Anschließend richtest du deinen Authenticator ein.{% endif %}</p>
   </div>
   {% if not configured %}
     <p class="nc-hint">Der Zugang ist noch nicht eingerichtet. Passwort einmalig bei der Installation festlegen.</p>

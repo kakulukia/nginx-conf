@@ -702,14 +702,24 @@ Die Anwendung hat genau einen Zugang ohne Nutzername oder Nutzerverwaltung.
 Die reguläre Anmeldung im Browser verlangt Passwort und TOTP-Code.
 Web-Setup, Setup-Token und per SSH erzeugte Login-Tokens entfallen.
 
-Bei der Installation legt `scripts/nginx-conf-auth` ausschließlich das Passwort
-fest. Es wird verdeckt zweimal eingegeben. Beim ersten Login prüft die App
-dieses Passwort und zeigt anschließend einen lokal erzeugten QR-Code für die
+Bei der Installation legt `scripts/nginx-conf-auth` ein vorläufiges
+Installationspasswort fest. Es wird verdeckt zweimal eingegeben und bereits
+als Argon2id-Hash in `/opt/nginx-config/nginx-conf.sqlite3` gespeichert.
+Beim ersten Login prüft die App dieses Passwort und verlangt im Dialog
+„Setze dein Passwort“ ein eigenes Passwort samt Wiederholung. Dieses muss
+mindestens 12 Zeichen haben und vom Installationspasswort abweichen.
+Der Hash wird atomar ersetzt; das Installationspasswort, bestehende Sessions
+und andere laufende Einrichtungen werden dabei ungültig. Die vorläufige
+Browserberechtigung wird rotiert und bleibt auf ihre ursprüngliche Ablaufzeit
+beschränkt. Ein erneutes Anmelden mit dem eigenen Passwort setzt eine
+abgebrochene Einrichtung beim Authenticator fort.
+Anschließend zeigt die App einen lokal erzeugten QR-Code für die
 Authenticator-App. Alternativ lässt sich der Schlüssel manuell eintragen.
 Erst die Bestätigung mit einem aktuellen TOTP-Code aktiviert den Authenticator
 und erzeugt die erste App-Sitzung. Der bestätigte Code ist damit verbraucht.
 
-Die vorläufige Einrichtungsberechtigung läuft nach zehn Minuten ab. Sie ist
+Die vorläufige Einrichtungsberechtigung für beide Schritte läuft insgesamt
+nach zehn Minuten ab. Sie ist
 an den aktuellen Passwort-Hash gebunden und erlaubt keinen Zugriff auf die
 App oder deren APIs. Ihr Zufallstoken wird serverseitig nur gehasht gespeichert;
 das HTTPS-Cookie ist Secure, HttpOnly und SameSite=Strict. Der QR-Code bleibt
@@ -722,9 +732,12 @@ kann einen bereits bestätigten Authenticator nicht überschreiben. Nach der
 Bestätigung werden alle vorläufigen Einrichtungsberechtigungen gelöscht.
 
 Zum Wiederherstellen nach Verlust dient derselbe lokale Installationsbefehl
-mit `--replace`. Er setzt ein neues Passwort, entfernt den Authenticator und
+mit `--replace`. Er setzt ein neues Installationspasswort, entfernt den Authenticator und
 invalidiert alle Sessions und laufenden Einrichtungen. Beim nächsten Login
-wird der Authenticator wieder im Browser eingerichtet.
+wird zuerst das eigene Passwort gesetzt und danach der Authenticator wieder
+im Browser eingerichtet. Bestehende Zugänge mit bestätigtem Authenticator
+behalten beim Datenbank-Update ihren bisherigen Ablauf. Noch nicht abgeschlossene
+Einrichtungen verlangen vor der TOTP-Bestätigung den Passwortwechsel.
 
 `argon2-cffi` speichert das Passwort als Argon2id-Hash mit eigenem Salt,
 64 MiB Speicher, drei Durchläufen und Parallelität 1. `PyOTP` prüft sechsstellige
