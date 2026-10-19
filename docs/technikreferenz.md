@@ -73,6 +73,8 @@ bereits gespeicherte Auswahl verwenden.
 - Backend: Python 3.15, lokal über `.python-version` ausgewählt
 - Projekt- und Dependency-Verwaltung: `uv`
 - Webframework: FastAPI
+- ASGI-Server: Uvicorn ohne optionale Extras; keine YAML-Logging-Konfiguration
+  und keine WebSocket-Endpunkte. Der Produktionsbetrieb nutzt asyncio und h11.
 - Templates: Jinja2
 - Frontend-Interaktion: HTMX, wenn es konkrete Workflows vereinfacht
 - Gestaltungsgrundlage: eigener Styleguide aus Vorspiel-Abrechnung, dokumentiert
@@ -771,10 +773,12 @@ Quellen: [OWASP zur Passwortspeicherung](https://cheatsheetseries.owasp.org/chea
 [PyOTP](https://pyauth.github.io/pyotp/) und
 [argon2-cffi](https://argon2-cffi.readthedocs.io/en/stable/howto.html).
 
-Bevorzugte Netzwerkbegrenzung fuer `config.pepperz.de` ist eine oeffentliche
-DNS-Domain mit strikter IP-Allowlist. Tailscale oder VPN bleiben Alternativen.
+Die erste Installation von `config.pepperz.de` ist nach der Entscheidung vom
+19.10.2026 ohne IP-Allowlist öffentlich erreichbar. Passwort, TOTP und die
+persistente Begrenzung der Anmeldeversuche bleiben verpflichtend. Eine spätere
+IP-Allowlist sowie Tailscale oder VPN bleiben mögliche Netzwerkbegrenzungen.
 
-Allowlist-Kontext:
+Kontext der optionalen IP-Allowlist:
 
 - Allowlist-Datei: `/etc/nginx/snippets/config-admin-allowlist.conf`
 - Nginx-Include fuer erlaubte Admin-IPs

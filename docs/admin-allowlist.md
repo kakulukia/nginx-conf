@@ -1,7 +1,11 @@
 # Admin-IP-Allowlist
 
-Die Admin-Domain `config.pepperz.de` bleibt oeffentlich erreichbar, wird
-aber durch ein Nginx-Snippet auf erlaubte Quell-IPs begrenzt.
+Die erste Installation von `config.pepperz.de` verwendet nach der Entscheidung
+vom 19.10.2026 keine IP-Allowlist. Passwort, TOTP und die Anmeldebegrenzung
+schützen den öffentlich erreichbaren Zugang.
+
+Diese Anleitung beschreibt die optionale spätere Begrenzung auf feste
+Quell-IPs. Erst nach deren Einrichtung den Include in die Nginx-Config aufnehmen.
 
 Zielpfad auf dem Server:
 
@@ -46,7 +50,7 @@ danach reloaden.
 
 ## Nginx-Include
 
-Die Admin-vhost-Config muss das Snippet im passenden `server`- oder
+Bei aktivierter IP-Allowlist muss die Admin-vhost-Config das Snippet im passenden `server`- oder
 `location`-Block einbinden:
 
 ```nginx

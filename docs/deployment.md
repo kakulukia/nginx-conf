@@ -6,6 +6,27 @@ Die Admin-Domain ist `config.pepperz.de`, das erste Projekt wird unter
 vereinbart. Die Installation braucht eine gesonderte Deployment-Freigabe.
 Nginx und die Verwaltungs-App laufen als Systemdienste, Webapps unter PM2.
 
+## Geprüfter Serverstand vom 19.10.2026
+
+Der lesende Check über `andy@config.pepperz.de` bestätigt Ubuntu 26.04.1 LTS
+auf x86_64. Der interne Hostname ist noch `stage.pepperz.de`. Der bestätigte
+ED25519-Fingerprint lautet
+`SHA256:XI2RzZ0HFnBYBES5WXXICA3B7xISqT3vngcpT2wWJG4`.
+Passwortloses sudo funktioniert.
+
+Git und sudo sind vorhanden, das System-Python ist 3.14.4. Nginx, Certbot,
+Node/npm, PM2, Sass, uv und Python 3.15 fehlen. Der Nutzer `nginx-config`,
+App-Code, Datenverzeichnis, Helper und App-Dienste sind noch nicht eingerichtet.
+`/opt/www` ist leer. Auf den Webports 80, 443 und 8080 lauscht kein Dienst.
+UFW ist inaktiv, das nftables-Regelwerk ist leer. Eine zusätzliche
+Provider-Firewall wurde nicht geprüft.
+
+Die Systemzeit ist synchronisiert. Es stehen etwa 3,1 GiB RAM und 288 GiB
+Plattenplatz zur Verfügung. Beide Domains haben den passenden A-Record und
+keinen AAAA-Record. Die VM hat zusätzlich die IPv6-Adresse `2a01:239:42e:ea00::1`.
+Anwendungsspezifische Sicherung und Wiederherstellung sind noch festzulegen;
+etwaige Sicherungen beim Provider wurden nicht geprüft.
+
 ## Pakete und Programmcode
 
 Benoetigt werden Git, Nginx, sudo, Certbot samt Nginx-Plugin, Python ab 3.15,
@@ -16,11 +37,23 @@ auch beim `uv sync` angeben. Vorspiel-Abrechnung benötigt mindestens Python
 3.14.6; dessen eigene Laufzeit und Abhängigkeiten separat prüfen.
 Die Installation samt Elternverzeichnissen muss fuer den App-Nutzer lesbar
 und ausfuehrbar sein.
-uv wird aus der offiziellen Distribution nach `/usr/local/bin` installiert.
+uv wird nach den [offiziellen Installer-Optionen](https://docs.astral.sh/uv/reference/installer/)
+nach `/usr/local/bin` installiert, ohne Shellprofile zu verändern.
+
+Die Admin-App verwendet Uvicorn ohne optionale Extras. YAML-Logging,
+WebSockets und Dateiüberwachung werden im Betrieb nicht benötigt.
+Für die Produktionsabhängigkeiten sind keine zusätzlichen Build-Werkzeuge
+oder LibYAML vorgesehen. Der Linux-Trockenlauf für Python 3.15 auf x86_64
+mit `--no-build` kommt ausschließlich mit fertigen Wheels aus.
+PyYAML bleibt nur über pre-commit in den Entwicklungsabhängigkeiten;
+der dokumentierte Produktionsaufruf installiert es nicht.
+Der echte `uv sync` und anschließend der Import der App werden vor dem
+Dienststart auf pepperz geprüft.
 
 ```bash
 sudo apt update
 sudo apt install git nginx sudo certbot python3-certbot-nginx python3-venv nodejs npm
+curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_UNMANAGED_INSTALL=/usr/local/bin sh
 sudo npm install -g pm2 sass
 ```
 
@@ -32,7 +65,10 @@ Service-PATH liegen, nicht in persoenlichen fnm-/nvm-Verzeichnissen.
 Den freigegebenen Git-Stand nach `/opt/nginx-conf` uebertragen. Code,
 virtuelle Umgebung, Helper und Elternverzeichnisse bleiben root-owned und
 fuer `nginx-config` nicht schreibbar. Keine lokale Datenbank uebertragen.
-Private Repositories brauchen einen separat eingerichteten Deploy-Key.
+Der Code kann als Archiv des freigegebenen lokalen Git-Commits per SSH
+übertragen werden. Dafür braucht die Admin-App keinen GitHub-Zugang auf dem
+Server. Nur beim direkten Clone eines privaten Repositories auf dem Server
+ist ein separat eingerichteter Deploy-Key erforderlich.
 
 ```bash
 cd /opt/nginx-conf
@@ -78,7 +114,12 @@ DNS fuer `config.pepperz.de` muss auf pepperz zeigen. Auch vorhandene
 AAAA-Records muessen stimmen. Beide Domains muessen auf `81.169.200.21`
 zeigen. Port 8080 bleibt ausschliesslich an Loopback.
 
-Zuerst die Admin-Quell-IPs nach `docs/admin-allowlist.md` eintragen.
+Die erste Installation verwendet nach der Entscheidung vom 19.10.2026 keine
+Admin-IP-Allowlist. Die Anmeldung ist öffentlich erreichbar und durch Passwort,
+TOTP und die Anmeldebegrenzung geschützt. Die Nginx-Vorlage benötigt deshalb
+keine zusätzliche Allowlist-Datei. Eine spätere Begrenzung auf feste Quell-IPs
+ist optional unter `docs/admin-allowlist.md` beschrieben.
+
 `deploy/nginx-conf.nginx` root-owned nach
 `/etc/nginx/sites-available/nginx-conf` kopieren und von `sites-enabled`
 verlinken. Das ist eine initiale HTTP-Config. Erst nach erfolgreicher
@@ -90,9 +131,9 @@ sudo systemctl reload nginx
 sudo certbot --nginx --non-interactive --agree-tos --email andy@freilandkiwis.de --no-eff-email --keep-until-expiring -d config.pepperz.de --redirect
 ```
 
-Danach HTTPS, Redirect und die IP-Allowlist pruefen. Die Allowlist muss auch
-im HTTPS-vhost enthalten bleiben. Das ist ein manueller Bootstrap ausserhalb
-der noch nicht gestarteten App.
+Danach HTTPS und Redirect prüfen. Falls später eine IP-Allowlist aktiviert
+wird, muss sie auch im HTTPS-vhost enthalten bleiben. Das ist ein manueller
+Bootstrap außerhalb der noch nicht gestarteten App.
 
 ## PM2 und systemd
 
@@ -123,6 +164,29 @@ verhindern weiterhin direkte Config-/Code-Aenderungen durch den App-Nutzer.
 `NoNewPrivileges=false` ermoeglicht die separat durch sudoers begrenzte
 Rechteerhoehung. `PrivateTmp=false` macht Gunicorn-Sockets unter `/tmp`
 fuer den Host-Nginx sichtbar.
+
+## Server-Adressen für DNS-Prüfungen
+
+Die App benötigt ihre öffentlichen Server-Adressen als technische Einstellung
+für DNS-Preflight und die davon abhängigen Zertifikatsaktionen. Das ist
+unabhängig von einer Admin-IP-Allowlist. Bis zum späteren Einstellungsdialog
+werden die beim Servercheck bestätigten Adressen bei der Installation
+einmalig hinterlegt:
+
+```bash
+sudo -u nginx-config /opt/nginx-conf/.venv/bin/python -I - <<'PY'
+import sys
+sys.path.insert(0, "/opt/nginx-conf/src")
+from nginx_conf.store import AppDatabase
+
+db = AppDatabase()
+db.initialize()
+db.upsert_server_ip("81.169.200.21", label="pepperz IPv4")
+db.upsert_server_ip("2a01:239:42e:ea00::1", label="pepperz IPv6")
+PY
+```
+
+Vor der Verwendung dieser Werte auf einem anderen Server erneut prüfen.
 
 ## Passwort und TOTP
 

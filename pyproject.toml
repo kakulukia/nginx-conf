@@ -11,7 +11,7 @@ dependencies = [
     "pyotp==2.10.0",
     "python-multipart==0.0.32",
     "qrcode==8.2",
-    "uvicorn[standard]==0.54.0",
+    "uvicorn==0.54.0",
 ]
 
 [project.optional-dependencies]
