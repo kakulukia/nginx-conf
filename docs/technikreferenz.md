@@ -710,9 +710,19 @@ Die Anwendung hat genau einen Zugang ohne Nutzername oder Nutzerverwaltung.
 Die reguläre Anmeldung im Browser verlangt Passwort und TOTP-Code.
 Web-Setup, Setup-Token und per SSH erzeugte Login-Tokens entfallen.
 
-Bei der Installation legt `scripts/nginx-conf-auth` ein vorläufiges
-Installationspasswort fest. Es wird verdeckt zweimal eingegeben und bereits
-als Argon2id-Hash in `/opt/nginx-config/nginx-conf.sqlite3` gespeichert.
+Bei der Installation liegt das vorläufige Passwort in
+`/opt/nginx-config/installation-password` als einzelne UTF-8-Zeile mit 12 bis
+1024 Zeichen. Die reguläre Datei gehört dem App-Nutzer und hat Modus `0600`;
+Symlinks werden abgewiesen. Beim Dienststart liest die App diese Datei nur
+bei noch nicht konfiguriertem Zugang ein, speichert den Argon2id-Hash in
+`/opt/nginx-config/nginx-conf.sqlite3` und löscht anschließend die Klartextdatei.
+Fehlt die Datei, bleibt die neue Installation gesperrt; ungültige Dateien
+verhindern den Start und bleiben zur Korrektur erhalten. Bestehende Zugänge
+werden durch eine neue Datei weder ersetzt noch zurückgesetzt; die Datei wird
+in diesem Fall ignoriert und muss manuell entfernt werden.
+Alternativ legt `scripts/nginx-conf-auth` das Installationspasswort durch
+zweimalige verdeckte Eingabe fest. Dieser Weg bleibt für die Wiederherstellung
+mit `--replace` erhalten. Das Installationspasswort hat keine feste Ablaufzeit.
 Beim ersten Login prüft die App dieses Passwort und verlangt im Dialog
 „Setze dein Passwort“ ein eigenes Passwort samt Wiederholung. Dieses muss
 mindestens 12 Zeichen haben und vom Installationspasswort abweichen.

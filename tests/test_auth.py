@@ -41,6 +41,108 @@ def test_installation_sets_only_password_and_rejects_accidental_replacement(tmp_
         auth.configure_password(db, password=PASSWORD)
 
 
+@pytest.mark.parametrize("ending", ["", "\n", "\r\n"])
+@pytest.mark.parametrize("password", [PASSWORD, "x" * 1024])
+def test_installation_password_file_is_hashed_once_and_removed(tmp_path: Path, ending: str, password: str) -> None:
+    db = AppDatabase(tmp_path / "auth.sqlite3")
+    db.initialize()
+    path = tmp_path / "installation-password"
+    path.write_text(password + ending, encoding="utf-8")
+    path.chmod(0o600)
+
+    auth.load_installation_password(db)
+
+    credentials = db.get_auth_credentials()
+    assert auth.PASSWORD_HASHER.verify(credentials.password_hash, password)
+    assert credentials.password_change_required
+    assert credentials.totp_secret == ""
+    assert not path.exists()
+    auth.load_installation_password(db)
+    assert db.get_auth_credentials() == credentials
+    assert isinstance(auth.login(db, password=password, code="", now=NOW), auth.EnrollmentRequired)
+
+
+def test_installation_without_password_file_keeps_access_unconfigured(tmp_path: Path) -> None:
+    db = AppDatabase(tmp_path / "auth.sqlite3")
+    db.initialize()
+    auth.load_installation_password(db)
+    assert db.get_auth_credentials() is None
+
+
+def test_installation_password_file_never_replaces_configured_access(db: AppDatabase) -> None:
+    credentials = db.get_auth_credentials()
+    path = db.path.parent / "installation-password"
+    path.write_text("different-install-password", encoding="utf-8")
+    path.chmod(0o600)
+    auth.load_installation_password(db)
+    assert db.get_auth_credentials() == credentials
+    assert path.exists()
+
+
+@pytest.mark.parametrize(
+    "content", ["", "short", "x" * 1025, PASSWORD + "\nsecond line", "x" * 1024 + "\r\nsecond line", "\n" * 2, b"\xff"]
+)
+def test_invalid_installation_password_file_preserves_unconfigured_access(tmp_path: Path, content: str | bytes) -> None:
+    db = AppDatabase(tmp_path / "auth.sqlite3")
+    db.initialize()
+    path = tmp_path / "installation-password"
+    path.write_bytes(content.encode() if isinstance(content, str) else content)
+    path.chmod(0o600)
+    with pytest.raises(auth.AuthError) as error:
+        auth.load_installation_password(db)
+    assert PASSWORD not in str(error.value)
+    assert db.get_auth_credentials() is None
+    assert path.exists()
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o700])
+def test_installation_password_file_rejects_non_private_permissions(tmp_path: Path, mode: int) -> None:
+    db = AppDatabase(tmp_path / "auth.sqlite3")
+    db.initialize()
+    path = tmp_path / "installation-password"
+    path.write_text(PASSWORD, encoding="utf-8")
+    path.chmod(mode)
+    with pytest.raises(auth.AuthError, match="0600"):
+        auth.load_installation_password(db)
+    assert db.get_auth_credentials() is None
+    assert path.exists()
+
+
+def test_installation_password_file_rejects_symlinks(tmp_path: Path) -> None:
+    db = AppDatabase(tmp_path / "auth.sqlite3")
+    db.initialize()
+    target = tmp_path / "private-password"
+    target.write_text(PASSWORD, encoding="utf-8")
+    target.chmod(0o600)
+    (tmp_path / "installation-password").symlink_to(target)
+    with pytest.raises(auth.AuthError, match="sicher geöffnet"):
+        auth.load_installation_password(db)
+    assert db.get_auth_credentials() is None
+    assert target.read_text() == PASSWORD
+
+
+def test_installation_password_file_rejects_different_owner(monkeypatch, tmp_path: Path) -> None:
+    db = AppDatabase(tmp_path / "auth.sqlite3")
+    db.initialize()
+    path = tmp_path / "installation-password"
+    path.write_text(PASSWORD, encoding="utf-8")
+    path.chmod(0o600)
+    monkeypatch.setattr(auth.os, "geteuid", lambda: path.stat().st_uid + 1)
+    with pytest.raises(auth.AuthError, match="App-Nutzers"):
+        auth.load_installation_password(db)
+    assert db.get_auth_credentials() is None
+
+
+def test_installation_password_file_rejects_fifo_without_waiting(tmp_path: Path) -> None:
+    db = AppDatabase(tmp_path / "auth.sqlite3")
+    db.initialize()
+    path = tmp_path / "installation-password"
+    auth.os.mkfifo(path, 0o600)
+    with pytest.raises(auth.AuthError, match="0600"):
+        auth.load_installation_password(db)
+    assert db.get_auth_credentials() is None
+
+
 def test_login_requires_both_factors_and_rejects_replay(db: AppDatabase) -> None:
     code = pyotp.TOTP(SECRET).at(NOW + 30)
     for password, otp in (("wrong", code), (PASSWORD, "wrong"), (PASSWORD, pyotp.TOTP(SECRET).at(NOW))):

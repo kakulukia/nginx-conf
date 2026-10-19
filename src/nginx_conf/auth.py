@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import secrets
+import stat
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -21,6 +23,7 @@ LOGIN_ATTEMPT_LIMIT = 5
 LOGIN_LOCK_SECONDS = 60
 PASSWORD_HASHER = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=1, type=Type.ID)
 LOGIN_ERROR = "Die Anmeldedaten sind ungültig."
+INSTALLATION_PASSWORD_FILENAME = "installation-password"
 
 
 class AuthError(ValueError):
@@ -43,6 +46,30 @@ def configure_password(db: AppDatabase, *, password: str, replace: bool = False)
         replace=replace,
         password_change_required=True,
     )
+
+
+def load_installation_password(db: AppDatabase) -> None:
+    if db.get_auth_credentials() is not None:
+        return
+    path = db.path.parent / INSTALLATION_PASSWORD_FILENAME
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return
+    except OSError:
+        raise AuthError("Die Installationspasswort-Datei kann nicht sicher geöffnet werden.") from None
+    with os.fdopen(fd, encoding="utf-8") as source:
+        info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o600:
+            raise AuthError("Erwartet wird eine reguläre Installationspasswort-Datei des App-Nutzers mit Modus 0600.")
+        try:
+            password = source.read(1027).removesuffix("\n").removesuffix("\r")
+        except UnicodeError:
+            raise AuthError("Die Installationspasswort-Datei muss UTF-8 enthalten.") from None
+    if "\n" in password or "\r" in password:
+        raise AuthError("Die Installationspasswort-Datei darf nur eine Passwortzeile enthalten.")
+    configure_password(db, password=password)
+    path.unlink()
 
 
 def matching_totp_step(secret: str, code: str, *, now: int | None = None) -> int | None:

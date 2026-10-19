@@ -2,7 +2,7 @@
 name = "nginx-conf"
 version = "0.1.0"
 description = "Web tool for managing Nginx project configs"
-readme = "docs/technikreferenz.md"
+readme = "README.md"
 requires-python = ">=3.15"
 dependencies = [
     "argon2-cffi==25.1.0",

@@ -1,5 +1,6 @@
 import json
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -14,6 +15,7 @@ from nginx_conf.auth import (
     EnrollmentRequired,
     confirm_enrollment,
     enrollment_secret,
+    load_installation_password,
     login,
     logout,
     password_change_required,
@@ -82,7 +84,14 @@ from nginx_conf.system_actions import (
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
-app = FastAPI(title="Nginx-Verwaltungstool")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    load_installation_password(get_database())
+    yield
+
+
+app = FastAPI(title="Nginx-Verwaltungstool", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 PROJECT_ROOT = Path("/opt/www")
 SITES_ENABLED_ROOT = Path("/etc/nginx/sites-enabled")

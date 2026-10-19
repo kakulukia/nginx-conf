@@ -244,13 +244,30 @@ Vor der Verwendung dieser Werte auf einem anderen Server erneut prüfen.
 
 Die Anwendung hat genau einen Zugang ohne Nutzernamen. Ein Web-Setup und
 Login-Tokens entfallen. Bei der Installation ein vorläufiges Installationspasswort
-festlegen. Dafür einmalig im Terminal ausführen:
+in `/opt/nginx-config/installation-password` hinterlegen:
+
+```bash
+sudo install -o nginx-config -g nginx-config -m 0600 /dev/null /opt/nginx-config/installation-password
+sudoedit /opt/nginx-config/installation-password
+sudo systemctl restart nginx-conf.service
+```
+
+Die Datei enthält genau eine UTF-8-Passwortzeile mit 12 bis 1024 Zeichen,
+gehört dem App-Nutzer und hat Modus `0600`. Ein abschließender Zeilenumbruch
+ist erlaubt. Beim Dienststart wird der Argon2id-Hash gespeichert und die Datei
+anschließend gelöscht. Die Datei ersetzt niemals einen bereits konfigurierten
+Zugang; in diesem Fall bleibt sie ignoriert liegen und ist manuell zu entfernen.
+Ohne Datei bleibt eine neue Installation gesperrt. Falsche Rechte, Symlinks
+oder ungültiger Inhalt verhindern den Dienststart; die Datei zur Korrektur behalten.
+Der Ablauf steht auch in [README.md](../README.md).
+
+Alternativ das Installationspasswort verdeckt im Terminal setzen:
 
 ```bash
 sudo -u nginx-config /opt/nginx-conf/.venv/bin/python -I /opt/nginx-conf/scripts/nginx-conf-auth
 ```
 
-Der Befehl fragt ausschließlich das Installationspasswort zweimal verdeckt ab und speichert
+Dieser alternative Befehl fragt das Installationspasswort zweimal verdeckt ab und speichert
 es als Argon2id-Hash. Das Passwort hat mindestens 12 Zeichen. Keine Passwörter
 oder TOTP-Geheimnisse als Kommandozeilenargumente übergeben.
 

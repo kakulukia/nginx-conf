@@ -26,6 +26,22 @@ client = TestClient(main.app)
 ROOT = main.Path(__file__).parent
 
 
+def test_startup_loads_installation_password_file_before_first_login(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(main, "DATABASE_PATH", tmp_path / "nginx-conf.sqlite3")
+    path = tmp_path / "installation-password"
+    path.write_text("local-install-password\n", encoding="utf-8")
+    path.chmod(0o600)
+
+    with TestClient(main.app, base_url="https://testserver") as browser:
+        assert not path.exists()
+        assert browser.get("/login").status_code == 200
+        assert browser.get("/api/projects").status_code == 401
+        response = browser.post("/api/login", data={"password": "local-install-password"}, follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"] == "/login/password"
+        assert browser.get("/api/projects").status_code == 401
+
+
 def authenticate_test_client(db: AppDatabase) -> None:
     client.cookies.clear()
     session_token = "local-test-session"
