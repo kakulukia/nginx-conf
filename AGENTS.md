@@ -29,3 +29,9 @@
 - Keine freie Shell-Ausfuehrung als Webfeature planen oder implementieren.
 - Sicherheitsrelevante Funktionen muessen mit klaren Allowlists, Pfadvalidierung und minimalen Rechten umgesetzt werden.
 - Nginx bleibt ein Systemdienst; PM2 ist nur fuer verwaltete Webapps vorgesehen.
+
+## Projektausnahme zur Auslieferung
+
+- Jede Commit-Freigabe umfasst in diesem Projekt auch den normalen Push und das anschliessende Deployment des vollstaendigen Commit-Stands auf pepperz unter `config.pepperz.de`. Dafuer ist keine erneute Deployment-Freigabe erforderlich.
+- Nach jedem Deployment den installierten Commit und die Erreichbarkeit der App pruefen. Bestehende Zugangsdaten und Anwendungsdaten erhalten.
+- Die Freigabe zum Stagen und Committen bleibt weiterhin erforderlich.

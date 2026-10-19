@@ -3,6 +3,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_default_vhost_rejects_unknown_names_on_both_ip_versions() -> None:
+    config = (ROOT / "deploy/nginx-default-deny.conf").read_text(encoding="utf-8")
+
+    for listener in [
+        "80 default_server",
+        "[::]:80 default_server",
+        "443 ssl default_server",
+        "[::]:443 ssl default_server",
+    ]:
+        assert f"listen {listener};" in config
+    assert "ssl_reject_handshake on;" in config
+    assert config.count("return 444;") == 2
+    assert "proxy_pass" not in config
+
+
 def test_systemd_unit_runs_as_dedicated_unprivileged_user() -> None:
     service = (ROOT / "deploy/nginx-conf.service").read_text(encoding="utf-8")
 

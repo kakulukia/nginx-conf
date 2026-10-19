@@ -710,6 +710,16 @@ sie mit klarem Blocker.
 Ziel-Origin fuer die Verwaltungs-App auf pepperz ist `config.pepperz.de`.
 Das erste verwaltete Projekt vorspiel-abrechnung nutzt `va.pepperz.de`.
 
+Ein separater Standard-VHost aus `deploy/nginx-default-deny.conf` verwirft auf
+Port 80 und 443 für IPv4 und IPv6 alle nicht ausdrücklich konfigurierten Namen.
+HTTP erhält einen Verbindungsabbruch (`444`), unbekannte oder fehlende TLS-Namen
+werden bereits beim Handshake abgewiesen. Ein abweichender HTTP-Host auf einer
+Verbindung mit bekanntem TLS-Namen wird ebenfalls verworfen. Die Datei liegt
+root-owned unter `/etc/nginx/conf.d/00-default-deny.conf` und bleibt außerhalb
+der durch Certbot bearbeiteten Admin-Config. `server_name` allein verhindert
+keinen Rückfall auf den ersten VHost; die expliziten `default_server`-Blöcke
+sind deshalb Bestandteil der Installation.
+
 Die Anwendung hat genau einen Zugang ohne Nutzername oder Nutzerverwaltung.
 Die reguläre Anmeldung im Browser verlangt Passwort und TOTP-Code.
 Web-Setup, Setup-Token und per SSH erzeugte Login-Tokens entfallen.

@@ -3,7 +3,10 @@
 Erstes Ziel ist pepperz (`81.169.200.21`, SSH-Nutzer `andy`, Ubuntu 26.04).
 Die Admin-Domain ist `config.pepperz.de`, das erste Projekt wird unter
 `va.pepperz.de` vorbereitet. Eine Uebernahme vorhandener Daten ist nicht
-vereinbart. Die Installation braucht eine gesonderte Deployment-Freigabe.
+vereinbart. Jede Commit-Freigabe umfasst in diesem Projekt auch Push und
+anschließendes Deployment des vollständigen Commit-Stands auf pepperz.
+Danach den installierten Commit und die Erreichbarkeit der App prüfen;
+bestehende Zugangsdaten und Anwendungsdaten bleiben erhalten.
 Nginx und die Verwaltungs-App laufen als Systemdienste, Webapps unter PM2.
 
 ## Serverstand vor der Installation am 19.10.2026
@@ -164,6 +167,25 @@ ist optional unter `docs/admin-allowlist.md` beschrieben.
 verlinken. Das ist eine initiale HTTP-Config. Erst nach erfolgreicher
 Zertifikatsausstellung ueber den Domainnamen anmelden.
 
+Vor dem ersten Reload den ablehnenden Standard-VHost installieren:
+
+```bash
+sudo install -o root -g root -m 0644 deploy/nginx-default-deny.conf /etc/nginx/conf.d/00-default-deny.conf
+```
+
+Einen gegebenenfalls aktiven Paket-Standard-VHost in `sites-enabled/default`
+zuerst prüfen und dessen Symlink entfernen, damit pro Adresse und Port nur
+ein `default_server` existiert. Andere vorhandene VHosts vorher abgleichen.
+Die HTTP- und HTTPS-Standardblöcke gelten für IPv4 und IPv6. Unbekannte
+HTTP-Hosts werden ohne HTTP-Antwort geschlossen (`444`); unbekannte oder
+fehlende TLS-Servernamen werden durch `ssl_reject_handshake on` bereits beim
+Verbindungsaufbau abgewiesen. Auch ein fremder HTTP-Host bei bekanntem
+TLS-Servernamen erhält keine App-Antwort. Explizit konfigurierte Domains
+bleiben erreichbar. Die Konfiguration benötigt Nginx ab 1.19.4.
+Sie bleibt unabhängig vom durch Certbot verwalteten Admin-VHost bestehen.
+Siehe [Nginx zur Standardauswahl](https://nginx.org/en/docs/http/request_processing.html)
+und [Ablehnung unbekannter TLS-Namen](https://nginx.org/en/docs/http/ngx_http_ssl_module.html#ssl_reject_handshake).
+
 ```bash
 sudo nginx -t
 sudo systemctl reload nginx
@@ -173,6 +195,11 @@ sudo certbot --nginx --non-interactive --agree-tos --email andy@freilandkiwis.de
 Danach HTTPS und Redirect prüfen. Falls später eine IP-Allowlist aktiviert
 wird, muss sie auch im HTTPS-vhost enthalten bleiben. Das ist ein manueller
 Bootstrap außerhalb der noch nicht gestarteten App.
+Zusätzlich unbekannte Hosts und den direkten IP-Aufruf über beide IP-Versionen
+prüfen. Unbekannte TLS-Namen dürfen kein Zertifikat der Admin-App erhalten;
+unbekannte HTTP-Hosts dürfen deren Anmeldeseite nicht erreichen.
+Für `config.pepperz.de` müssen Redirect, HTTPS und der
+Zertifikatserneuerungsprobelauf weiterhin funktionieren.
 
 ## PM2 und systemd
 
