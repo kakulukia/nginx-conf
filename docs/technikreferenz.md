@@ -164,10 +164,16 @@ Konkrete Installationsartefakte liegen in `deploy/nginx-conf.service`,
 `deploy/nginx-conf.nginx` und `deploy/nginx-conf.sudoers`; die Installationsschritte stehen in
 `docs/deployment.md`.
 Die Unit behaelt `ProtectSystem=strict` und `ProtectHome=true`, erlaubt aber
-gezielte beschreibbare Betriebs-Mounts fuer den sudo-Helper. Dateirechte
+gezielte beschreibbare Betriebs-Mounts fuer den sudo-Helper.
+Für `nginx -t` ist auch die bestehende `/run/nginx.pid` beschreibbar
+eingebunden. Die Unit startet deshalb nach `nginx.service`; eine Freigabe
+für das gesamte `/run` gibt es nicht. `PartOf=nginx.service` erneuert bei einem
+Nginx-Neustart auch den PID-Datei-Mount der Admin-App. Dateirechte
 schuetzen root-eigenen Code und Configs weiterhin vor direkten App-Zugriffen.
 `NoNewPrivileges=false` erlaubt die durch sudoers begrenzte Rechteerhoehung;
 `PrivateTmp=false` haelt Gunicorn-Sockets fuer Host-Nginx sichtbar.
+Das gemeinsame `/tmp` ist ausdrücklich beschreibbar, damit unter anderem
+Certbot sein temporäres Startprotokoll erstellen kann.
 Fuer Schreibzugriffe in `/opt/www` und lokale Git-Commits ist der bevorzugte
 Weg eine root-eigene Helper-CLI mit festen Subcommands, z.B. `write-config`,
 `reset-config-to-head` und `commit-config`. Sie wird nur bei Bedarf per `sudo`

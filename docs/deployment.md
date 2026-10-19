@@ -6,7 +6,7 @@ Die Admin-Domain ist `config.pepperz.de`, das erste Projekt wird unter
 vereinbart. Die Installation braucht eine gesonderte Deployment-Freigabe.
 Nginx und die Verwaltungs-App laufen als Systemdienste, Webapps unter PM2.
 
-## Geprüfter Serverstand vom 19.10.2026
+## Serverstand vor der Installation am 19.10.2026
 
 Der lesende Check über `andy@config.pepperz.de` bestätigt Ubuntu 26.04.1 LTS
 auf x86_64. Der interne Hostname ist noch `stage.pepperz.de`. Der bestätigte
@@ -26,6 +26,45 @@ Plattenplatz zur Verfügung. Beide Domains haben den passenden A-Record und
 keinen AAAA-Record. Die VM hat zusätzlich die IPv6-Adresse `2a01:239:42e:ea00::1`.
 Anwendungsspezifische Sicherung und Wiederherstellung sind noch festzulegen;
 etwaige Sicherungen beim Provider wurden nicht geprüft.
+
+## Installation am 19.10.2026
+
+Die Installation wurde von Andy freigegeben. Installierte Codebasis ist
+Commit `3baa07f0d1c216dc633787883f7e6fbc3eb2b571`; sie steht zusätzlich in
+`/opt/nginx-conf/REVISION`. Die nachfolgend dokumentierten PID- und TMP-Mount-Korrekturen
+der systemd-Unit wurden bei der Inbetriebnahme ergänzt.
+
+Python 3.15.0 liegt root-owned unter `/opt/python`, die Produktionsumgebung
+unter `/opt/nginx-conf/.venv`. Installiert sind uv 0.13.1, Node 22.22.1,
+npm 9.2.0, PM2 7.0.4 und Sass 1.105.2. Die App läuft als `nginx-config`.
+Es wurden ausschließlich Produktionsabhängigkeiten aus dem Lockfile
+installiert; PyYAML und die optionalen Uvicorn-Extras sind nicht enthalten.
+
+`nginx.service`, `nginx-conf.service`, `pm2-nginx-config.service` und
+`certbot.timer` sind aktiv und für den Systemstart aktiviert. Nginx lauscht
+auf 80/443, Uvicorn ausschließlich auf `127.0.0.1:8080`.
+`https://config.pepperz.de/login` ist erreichbar, HTTP leitet auf HTTPS um.
+Das Let's-Encrypt-Zertifikat ist bis zum 17.01.2027 gültig.
+Ein Erneuerungsprobelauf im Mount-Namespace der App war erfolgreich.
+Dabei wurde lediglich die zufällige Startverzögerung abgeschaltet;
+der aktivierte Certbot-Timer verwendet weiterhin die reguläre Erneuerung.
+
+Geprüft sind der öffentliche Healthcheck, die Darstellung der Anmeldeseite im Browser,
+die Ablehnung nicht angemeldeter API-Zugriffe, Nginx-Test und Reload aus
+dem tatsächlichen Mount-Namespace der App sowie App- und Nginx-Neustart.
+Bei einem Nginx-Neustart startet die Admin-App mit neu; Reloads lassen sie
+weiterlaufen. Der PM2-Daemon bleibt bei beiden Neustarts unverändert.
+Root-eigener Programmcode, Helper und Nginx-Config bleiben für den App-Nutzer
+nicht direkt schreibbar; ein nicht erlaubter sudo-Befehl wird abgewiesen.
+Ein vollständiger Neustart der VM wurde nicht durchgeführt.
+
+Andy hat das Installationspasswort selbst gesetzt, den Passwortwechsel und
+die TOTP-Einrichtung im Browser abgeschlossen und den Login abgenommen.
+Auch das automatische Einfüllen des Einmalcodes durch 1Password wurde von
+ihm erfolgreich geprüft. Projektbezogene Schreibaktionen sind noch nicht
+mit einer verwalteten Webapp abgenommen.
+`/opt/www` enthält noch keine verwaltete Webapp; Vorspiel-Abrechnung ist
+noch nicht installiert. Backups und Wiederherstellung bleiben offen.
 
 ## Pakete und Programmcode
 
@@ -52,7 +91,7 @@ Dienststart auf pepperz geprüft.
 
 ```bash
 sudo apt update
-sudo apt install git nginx sudo certbot python3-certbot-nginx python3-venv nodejs npm
+sudo apt install --no-install-recommends git nginx sudo certbot python3-certbot-nginx python3-venv nodejs npm
 curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_UNMANAGED_INSTALL=/usr/local/bin sh
 sudo npm install -g pm2 sass
 ```
@@ -143,6 +182,7 @@ Startdienst eingerichtet, damit die Webapps nicht von deren Lebensdauer
 oder Mount-Namespace abhaengen.
 
 ```bash
+cd /opt/nginx-conf
 sudo -u nginx-config env HOME=/opt/nginx-config PM2_HOME=/opt/nginx-config/.pm2 /usr/bin/pm2 save --force
 sudo env PATH=/usr/local/bin:/usr/bin:/bin PM2_HOME=/opt/nginx-config/.pm2 /usr/bin/pm2 startup systemd -u nginx-config --hp /opt/nginx-config
 sudo -u nginx-config env HOME=/opt/nginx-config PM2_HOME=/opt/nginx-config/.pm2 /usr/bin/pm2 kill
@@ -157,13 +197,25 @@ Den erzeugten PM2-Dienst auf denselben Datenpfad pruefen. Erfolgreiche
 PM2-Schreibaktionen aus der App speichern die Prozessliste mit
 `pm2 save --force`. Ein Fehler beim Speichern wird gemeldet.
 Bei manuellen PM2-Aenderungen ebenfalls speichern.
+Die Bootstrap-Aufrufe müssen aus dem für `nginx-config` zugänglichen
+Programmverzeichnis erfolgen. Ein privates SSH-Home als Arbeitsverzeichnis
+führt beim PM2-Daemonstart zu `EACCES`.
 
 Die Admin-Unit behaelt `ProtectSystem=strict` und `ProtectHome=true`.
 Nur benoetigte Betriebsverzeichnisse haben beschreibbare Mounts. Unix-Rechte
 verhindern weiterhin direkte Config-/Code-Aenderungen durch den App-Nutzer.
 `NoNewPrivileges=false` ermoeglicht die separat durch sudoers begrenzte
 Rechteerhoehung. `PrivateTmp=false` macht Gunicorn-Sockets unter `/tmp`
-fuer den Host-Nginx sichtbar.
+fuer den Host-Nginx sichtbar. `/tmp` ist ausdrücklich beschreibbar, damit
+auch Certbot sein temporäres Startprotokoll anlegen kann. `ProtectSystem=strict`
+würde dieses Verzeichnis sonst ebenfalls schreibschützen.
+Für `nginx -t` ist zusätzlich ausschließlich `/run/nginx.pid` beschreibbar
+eingebunden. Nginx öffnet diese Datei auch beim Test zum Schreiben.
+Die Admin-Unit startet nach `nginx.service`, damit die PID-Datei bereits
+existiert. Eine Schreibfreigabe für das gesamte `/run` gibt es nicht.
+`PartOf=nginx.service` startet die Admin-App bei einem Nginx-Neustart mit neu,
+damit ihr Mount auf die neu erzeugte PID-Datei zeigt. Ein Reload lässt beide
+Dienste weiterlaufen; PM2 ist vom Neustart der Admin-App unabhängig.
 
 ## Server-Adressen für DNS-Prüfungen
 

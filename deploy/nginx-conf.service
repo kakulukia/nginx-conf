@@ -1,7 +1,9 @@
 [Unit]
 Description=Nginx configuration admin app
-After=network-online.target pm2-nginx-config.service
-Wants=network-online.target pm2-nginx-config.service
+After=network-online.target nginx.service pm2-nginx-config.service
+Wants=network-online.target nginx.service pm2-nginx-config.service
+# Refresh the PID-file mount when Nginx replaces that file during a restart.
+PartOf=nginx.service
 
 [Service]
 Type=simple
@@ -21,7 +23,9 @@ NoNewPrivileges=false
 PrivateTmp=false
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/nginx-config /opt/www /etc/nginx /etc/letsencrypt /var/lib/letsencrypt /var/log/letsencrypt /var/log/nginx /run/sudo
+# Nginx opens its existing PID file for writing even during a configuration test.
+# Certbot also needs the shared temporary directory to create its initial log.
+ReadWritePaths=/opt/nginx-config /opt/www /etc/nginx /etc/letsencrypt /var/lib/letsencrypt /var/log/letsencrypt /var/log/nginx /run/sudo /run/nginx.pid /tmp
 
 [Install]
 WantedBy=multi-user.target

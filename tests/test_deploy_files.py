@@ -19,6 +19,26 @@ def test_systemd_unit_runs_as_dedicated_unprivileged_user() -> None:
     assert "PM2_HOME=/opt/nginx-config/.pm2" in service
 
 
+def test_nginx_test_has_writable_pid_file_after_nginx_start() -> None:
+    service = (ROOT / "deploy/nginx-conf.service").read_text(encoding="utf-8")
+    directives = dict(line.split("=", 1) for line in service.splitlines() if "=" in line)
+
+    assert "nginx.service" in directives["After"].split()
+    assert "nginx.service" in directives["Wants"].split()
+    assert "nginx.service" in directives["PartOf"].split()
+    writable_paths = directives["ReadWritePaths"].split()
+    assert "/run/nginx.pid" in writable_paths
+    assert "/run" not in writable_paths
+
+
+def test_systemd_unit_keeps_shared_tmp_writable_for_certbot_and_sockets() -> None:
+    service = (ROOT / "deploy/nginx-conf.service").read_text(encoding="utf-8")
+    directives = dict(line.split("=", 1) for line in service.splitlines() if "=" in line)
+
+    assert directives["PrivateTmp"] == "false"
+    assert "/tmp" in directives["ReadWritePaths"].split()
+
+
 def test_sudoers_file_uses_fixed_commands_without_wildcards() -> None:
     sudoers = (ROOT / "deploy/nginx-conf.sudoers").read_text(encoding="utf-8")
 
