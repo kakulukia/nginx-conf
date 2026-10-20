@@ -130,6 +130,9 @@ def test_ssl_inventory_reports_all_warning_states_and_missing_certificates(tmp_p
     assert statuses["valid.example.com"].state == "valid"
     assert statuses["missing.example.com"].state == "missing"
     assert statuses["valid.example.com"].cert_path == tmp_path / "live/valid.example.com/cert.pem"
+    serialized = {status["domain"]: status for status in ssl_inventory_to_dict(inventory)["projects"][0]["domains"]}
+    assert serialized["valid.example.com"]["expires_at"] == "2026-07-11T12:00:00+00:00"
+    assert serialized["valid.example.com"]["cert_path"] == str(statuses["valid.example.com"].cert_path)
 
 
 def test_ssl_inventory_reports_unassigned_certbot_lineages(tmp_path: Path) -> None:
@@ -144,23 +147,6 @@ def test_ssl_inventory_reports_unassigned_certbot_lineages(tmp_path: Path) -> No
 
     assert [lineage.name for lineage in inventory.unassigned_lineages] == ["orphan.example.com"]
     assert inventory.projects[0].domains[0].state == "missing"
-
-
-def test_ssl_inventory_to_dict_serializes_paths_and_dates(tmp_path: Path) -> None:
-    cert_path = write_renewal(tmp_path, "demo.example.com", "demo.example.com")
-    inventory = discover_ssl_inventory(
-        [project(("demo.example.com",))],
-        letsencrypt_root=tmp_path,
-        now=NOW,
-        decoder=fake_decoder({str(cert_path): "Jul 11 12:00:00 2026 GMT"}),
-    )
-
-    payload = ssl_inventory_to_dict(inventory)
-
-    status = payload["projects"][0]["domains"][0]
-    assert status["domain"] == "demo.example.com"
-    assert status["expires_at"] == "2026-07-11T12:00:00+00:00"
-    assert status["cert_path"] == str(cert_path)
 
 
 def test_admin_only_certificate_is_not_an_unassigned_project_certificate(tmp_path):

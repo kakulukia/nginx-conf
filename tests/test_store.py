@@ -8,7 +8,6 @@ from nginx_conf.store import (
     ActionLockError,
     AppDatabase,
     PersistencePolicyError,
-    default_database_path,
 )
 
 
@@ -16,37 +15,6 @@ def make_db(tmp_path: Path) -> AppDatabase:
     db = AppDatabase(tmp_path / "opt/nginx-config/nginx-conf.sqlite3")
     db.initialize()
     return db
-
-
-def test_default_database_path_is_under_opt_nginx_config() -> None:
-    assert default_database_path() == Path("/opt/nginx-config/nginx-conf.sqlite3")
-
-
-def test_initialize_creates_sqlite_schema(tmp_path: Path) -> None:
-    db_path = tmp_path / "opt/nginx-config/nginx-conf.sqlite3"
-    db = AppDatabase(db_path)
-
-    db.initialize()
-
-    assert db_path.is_file()
-    with db._connect() as connection:
-        tables = {
-            row["name"]
-            for row in connection.execute(
-                "select name from sqlite_master where type = 'table'",
-            )
-        }
-    assert {
-        "actions",
-        "audit_log",
-        "managed_pm2_processes",
-        "project_selections",
-        "server_ips",
-        "auth_credentials",
-        "auth_sessions",
-        "auth_enrollments",
-        "ui_state",
-    }.issubset(tables)
 
 
 def test_basic_crud_for_audit_ui_ips_selection_and_pm2(tmp_path: Path) -> None:

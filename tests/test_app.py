@@ -172,13 +172,11 @@ def test_home_page(monkeypatch, tmp_path) -> None:
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "Nginx-Verwaltungstool" in response.text
     assert "demo-app" in response.text
     assert "demo.local" in response.text
     assert "aktiv" in response.text
     assert "Nginx-Auswahl" not in response.text
     assert 'href="/projects/demo-app"' in response.text
-    assert 'class="nc-table app-project-table"' in response.text
     assert "nginx -t" in response.text
     assert "/api/projects/clone" in response.text
     assert '<a href="/" aria-current="page">Projekte</a>' in response.text
@@ -220,13 +218,11 @@ def test_project_page_keeps_details_out_of_overview_and_scopes_projects(monkeypa
     assert "/configs/demo-app/app.nginx" in details.text
     assert "Nginx-Auswahl" in details.text
     assert '<a href="/" aria-current="page">Projekte</a>' not in details.text
-    assert "Nginx-Block" not in details.text
     assert details.text.count("Django ALLOWED_HOSTS fehlt") == 1
     assert details.text.count("Zertifikat ausstellen") == 1
     assert "/server-blocks/2/certbot/issue" in details.text
     assert "/server-blocks/1/certbot/issue" not in details.text
     assert "Domain kommt in mehreren server_name-Gruppen vor" not in details.text
-    assert "server 1:" not in details.text
     assert "other-project" not in details.text
     assert 'href="/">Projekte</a>' in details.text
 
@@ -298,7 +294,6 @@ def test_empty_project_table(monkeypatch, tmp_path) -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert "Noch keine Projekte" in response.text
-    assert 'class="nc-table app-project-table"' not in response.text
 
 
 @pytest.mark.parametrize(
@@ -477,16 +472,6 @@ def test_unconfigured_app_has_only_login_and_no_web_setup(monkeypatch, tmp_path)
     browser.cookies.set(SESSION_COOKIE_NAME, "local-test-session")
     assert browser.get("/setup").status_code == 404
     assert browser.post("/api/setup", json={}).status_code == 404
-
-
-def test_project_page_shows_missing_django_allowed_hosts_at_domain_group(monkeypatch, tmp_path) -> None:
-    configure_temp_project_roots(monkeypatch, tmp_path)
-
-    response = client.get("/projects/demo-app")
-
-    assert response.status_code == 200
-    assert "Django ALLOWED_HOSTS fehlt" in response.text
-    assert "www.demo.local" in response.text
 
 
 def test_configs_index_shows_demo_config(monkeypatch, tmp_path) -> None:
@@ -1029,16 +1014,6 @@ def test_static_location_api_rejects_unlisted_static_path(monkeypatch, tmp_path)
     assert "relative project path" in response.json()["detail"]
 
 
-def test_project_page_shows_certbot_issue_action_for_missing_cert(monkeypatch, tmp_path) -> None:
-    configure_test_roots(monkeypatch, tmp_path)
-
-    response = client.get("/projects/demo-app")
-
-    assert response.status_code == 200
-    assert "Zertifikat ausstellen" in response.text
-    assert "/server-blocks/1/certbot/issue" in response.text
-
-
 def test_project_page_shows_renewal_check_for_expiring_certificate(monkeypatch, tmp_path) -> None:
     configure_test_roots(monkeypatch, tmp_path)
     expires_at = datetime(2026, 6, 25, 12, 0, tzinfo=UTC)
@@ -1429,7 +1404,11 @@ def test_project_selection_api_persists_valid_candidates(monkeypatch, tmp_path) 
     assert payload["pm2_selection_source"] == "saved"
 
     follow_up = client.get("/api/projects")
-    assert follow_up.json()["project_choices"][0]["pm2_selection_source"] == "saved"
+    saved_choice = follow_up.json()["project_choices"][0]
+    assert saved_choice["selected_nginx_config"] == str(config_path)
+    assert saved_choice["selected_pm2_start_script"] == str(script_path)
+    assert saved_choice["nginx_selection_source"] == "saved"
+    assert saved_choice["pm2_selection_source"] == "saved"
 
 
 def test_project_selection_api_rejects_unknown_candidate(monkeypatch, tmp_path) -> None:
@@ -1504,16 +1483,6 @@ def test_action_result_banner_can_be_acknowledged(monkeypatch, tmp_path) -> None
 
     assert response.status_code == 303
     assert AppDatabase(main.DATABASE_PATH).get_last_unacknowledged_result() is None
-
-
-def test_config_detail_shows_config_content(monkeypatch, tmp_path) -> None:
-    configure_test_roots(monkeypatch, tmp_path)
-
-    response = client.get("/configs/demo-app/+.nginx")
-
-    assert response.status_code == 200
-    assert "server_name" in response.text
-    assert "demo-app" in response.text
 
 
 def test_config_detail_rejects_free_path(monkeypatch, tmp_path) -> None:

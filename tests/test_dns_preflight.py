@@ -35,6 +35,10 @@ def test_dns_preflight_accepts_matching_a_and_aaaa_records(tmp_path: Path) -> No
 
     assert result.ok is True
     assert [domain.ok for domain in result.domains] == [True, True]
+    payload = dns_preflight_to_dict(result)
+    assert payload["ok"] is True
+    assert payload["configured_ipv4"] == ["203.0.113.10"]
+    assert payload["domains"][0]["domain"] == "example.com"
 
 
 def test_dns_preflight_blocks_missing_records(tmp_path: Path) -> None:
@@ -116,18 +120,3 @@ def test_dns_preflight_reports_mixed_group_results(tmp_path: Path) -> None:
     assert result.ok is False
     assert result.domains[0].ok is True
     assert result.domains[1].ok is False
-
-
-def test_dns_preflight_to_dict_serializes_result(tmp_path: Path) -> None:
-    db = make_db(tmp_path, "203.0.113.10")
-    result = check_dns_preflight(
-        ("example.com",),
-        db,
-        resolver=resolver({"example.com": (("203.0.113.10",), ())}),
-    )
-
-    payload = dns_preflight_to_dict(result)
-
-    assert payload["ok"] is True
-    assert payload["configured_ipv4"] == ["203.0.113.10"]
-    assert payload["domains"][0]["domain"] == "example.com"

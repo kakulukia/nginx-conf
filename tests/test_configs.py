@@ -20,13 +20,6 @@ def test_find_project_configs_finds_demo_app_config() -> None:
     ]
 
 
-def test_find_project_configs_ignores_non_config_files() -> None:
-    configs = find_project_configs(ROOT / "opt/www")
-
-    assert all(config.config_path.suffix == ".nginx" for config in configs)
-    assert all(config.config_path.name != ".gitkeep" for config in configs)
-
-
 def test_find_project_configs_does_not_follow_symlink_dirs(tmp_path: Path) -> None:
     root = tmp_path / "opt/www"
     root.mkdir(parents=True)

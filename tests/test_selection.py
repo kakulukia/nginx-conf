@@ -75,32 +75,6 @@ def test_build_project_choice_state_requires_selection_for_multiple_candidates(t
     assert "pm2_start_script_selection_required" in issue_codes(choice)
 
 
-def test_saved_selection_is_used_and_not_overwritten_by_single_candidate_scan(tmp_path: Path) -> None:
-    root = tmp_path / "opt/www"
-    enabled_root = tmp_path / "etc/nginx/sites-enabled"
-    project = root / "demo-app"
-    project.mkdir(parents=True)
-    enabled_root.mkdir(parents=True)
-    config_path = project / "app.nginx"
-    script_path = project / "start.sh"
-    config_path.write_text("server { listen 80; server_name app.example.com; }", encoding="utf-8")
-    script_path.write_text("#!/bin/sh\n", encoding="utf-8")
-    inventory = discover_inventory(root, enabled_root)
-    db = make_db(tmp_path)
-    db.save_project_selection(
-        "demo-app",
-        nginx_config_path=str(config_path),
-        pm2_start_script_path=str(script_path),
-    )
-
-    choice = build_project_choice_state(inventory.projects[0], db)
-
-    assert choice.selected_nginx_config == config_path
-    assert choice.nginx_selection_source == "saved"
-    assert choice.selected_pm2_start_script == script_path
-    assert choice.pm2_selection_source == "saved"
-
-
 def test_invalid_saved_selection_is_not_replaced_by_auto_choice(tmp_path: Path) -> None:
     root = tmp_path / "opt/www"
     enabled_root = tmp_path / "etc/nginx/sites-enabled"

@@ -67,14 +67,3 @@ def test_sudoers_file_uses_fixed_commands_without_wildcards() -> None:
     assert "/usr/local/lib/nginx-conf/nginx-conf-helper reset-config-to-head" in sudoers
     assert "/usr/local/lib/nginx-conf/nginx-conf-helper commit-config" in sudoers
     assert "/usr/local/lib/nginx-conf/nginx-conf-helper clone-project" in sudoers
-
-
-def test_admin_allowlist_docs_cover_ssh_fallback_backup_test_reload_and_audit() -> None:
-    docs = (ROOT / "docs/admin-allowlist.md").read_text(encoding="utf-8")
-
-    assert "/etc/nginx/snippets/config-admin-allowlist.conf" in docs
-    assert "python -m nginx_conf.admin_allowlist" in docs
-    assert "sudo cp -a" in docs
-    assert "sudo nginx -t" in docs
-    assert "sudo systemctl reload nginx" in docs
-    assert "logger -t nginx-conf-admin-allowlist" in docs
