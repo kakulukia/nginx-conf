@@ -104,7 +104,7 @@
         <span class="nc-status--warning">nicht konfiguriert</span>
       {% endif %}
     </p>
-    {% if choice.selected_pm2_start_script %}
+    {% if choice.selected_pm2_start_script and project.project_name not in managed_pm2_projects %}
       <form action="/api/projects/{{ project.project_name }}/pm2/create" method="post">
         <button class="nc-button" type="submit"{% if active_action %} disabled{% endif %}>PM2 anlegen</button>
       </form>

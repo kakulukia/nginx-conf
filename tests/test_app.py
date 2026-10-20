@@ -575,6 +575,24 @@ def test_pm2_api_reports_project_processes(monkeypatch, tmp_path) -> None:
     assert process["managed"] is True
 
 
+@pytest.mark.parametrize("registered_project", [None, "demo-app", "other-project"])
+def test_project_page_hides_pm2_create_for_registered_project(monkeypatch, tmp_path, registered_project) -> None:
+    project, _config, start_script = configure_pm2_project_roots(monkeypatch, tmp_path)
+    monkeypatch.setattr(main, "read_pm2_status", lambda **kwargs: PM2StatusInventory(processes=()))
+    if registered_project:
+        main.get_database().register_pm2_process(
+            project_name=registered_project,
+            pm2_name=f"{registered_project}-worker",
+            cwd=project,
+            start_script=start_script,
+        )
+
+    response = client.get("/projects/demo-app")
+
+    assert response.status_code == 200
+    assert ("PM2 anlegen" in response.text) == (registered_project != "demo-app")
+
+
 def test_pm2_create_api_uses_selected_start_script_and_registers_process(monkeypatch, tmp_path) -> None:
     project, _config, start_script = configure_pm2_project_roots(monkeypatch, tmp_path)
 

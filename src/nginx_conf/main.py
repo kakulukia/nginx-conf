@@ -497,6 +497,7 @@ def _projects_page(request: Request, *, title: str, project_name: str | None = N
             "django_deploy_statuses": django_deploy_statuses,
             "pm2_status": pm2_status,
             "pm2_processes_by_project": processes_by_project,
+            "managed_pm2_projects": {process.project_name for process in database.list_managed_pm2_processes()},
             "active_action": database.get_active_action(),
             "last_action_result": database.get_last_unacknowledged_result(),
         },
