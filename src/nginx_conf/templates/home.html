@@ -15,7 +15,7 @@
 {% endblock %}
 {% block navigation %}
 <nav class="nc-nav" aria-label="Hauptnavigation">
-  <a href="/"{% if log_sections is not defined %} aria-current="page"{% endif %}>Projekte</a>
+  <a href="/"{% if request.url.path in ['/', '/configs'] %} aria-current="page"{% endif %}>Projekte</a>
   <a href="/logs"{% if log_sections is defined %} aria-current="page"{% endif %}>Logs</a>
 </nav>
 {% endblock %}

@@ -161,3 +161,20 @@ def test_ssl_inventory_to_dict_serializes_paths_and_dates(tmp_path: Path) -> Non
     assert status["domain"] == "demo.example.com"
     assert status["expires_at"] == "2026-07-11T12:00:00+00:00"
     assert status["cert_path"] == str(cert_path)
+
+
+def test_admin_only_certificate_is_not_an_unassigned_project_certificate(tmp_path):
+    names_and_domains = {
+        "config.pepperz.de": "config.pepperz.de",
+        "config.pepperz.de-0001": "config.pepperz.de",
+        "orphan.example.com": "orphan.example.com",
+        "mixed": "config.pepperz.de,foreign.example.com",
+    }
+    paths = [write_renewal(tmp_path, name, domains) for name, domains in names_and_domains.items()]
+    inventory = discover_ssl_inventory(
+        [],
+        letsencrypt_root=tmp_path,
+        now=NOW,
+        decoder=fake_decoder({str(path): "Jul 11 12:00:00 2026 GMT" for path in paths}),
+    )
+    assert {lineage.name for lineage in inventory.unassigned_lineages} == {"orphan.example.com", "mixed"}

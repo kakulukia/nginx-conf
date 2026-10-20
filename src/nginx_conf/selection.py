@@ -120,6 +120,8 @@ def save_project_choice(
 
     if nginx_config_path is not None and nginx_config_path not in nginx_candidates:
         raise ValueError("Nginx-Config ist kein erlaubter Kandidat fuer dieses Projekt.")
+    if any(config.enabled and str(config.config_path) != nginx_config_path for config in project.configs):
+        raise ValueError("Eine andere Config ist aktiv. Bitte die Config-Auswahl auf der Projektseite verwenden.")
     if pm2_start_script_path is not None and pm2_start_script_path not in pm2_start_scripts:
         raise ValueError("PM2-Startscript ist kein erlaubter Kandidat fuer dieses Projekt.")
 

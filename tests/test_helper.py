@@ -466,3 +466,143 @@ def test_certbot_helper_checks_active_selected_config_and_action_domains(monkeyp
         "certbot-issue", payload, db_path=db.path, project_root=project_root, enabled_root=enabled
     )
     assert code == 1 and len(calls) == 1
+
+
+@pytest.mark.parametrize("link_name", ["demo-app", "demo-app.conf"])
+@pytest.mark.parametrize("failure", [None, "invalid", "timeout"])
+def test_config_switch_replaces_one_link_and_restores_it_on_test_failure(monkeypatch, tmp_path, link_name, failure):
+    project_root, project, old, db = create_repo_project(tmp_path)
+    target = project / "stage.nginx"
+    target.write_text("server { listen 80; server_name stage.example.com; }")
+    enabled = tmp_path / "enabled"
+    enabled.mkdir()
+    link = enabled / link_name
+    link.symlink_to(old)
+    action_id = db.create_action(
+        action_type="helper-activate-config",
+        subcommand="activate-config",
+        target=str(target),
+        project="demo-app",
+        config_path=target,
+        expected_file=target,
+        parameters={"switch_config": True, "previous_selection": str(old), "previous_active_config": str(old)},
+    )
+    original_run = subprocess.run
+
+    def run(argv, **kwargs):
+        if argv == ("/usr/sbin/nginx", "-t"):
+            assert list(enabled.iterdir()) == [link]
+            assert link.resolve() == target
+            assert db.get_active_action().action_id == action_id
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(argv, 120)
+            return subprocess.CompletedProcess(argv, 1 if failure else 0, "", "invalid config" if failure else "ok")
+        return original_run(argv, **kwargs)
+
+    monkeypatch.setattr(helper_module.subprocess, "run", run)
+    exit_code, response = handle_helper_request(
+        "activate-config",
+        request_payload(action_id, "activate-config", target, link_path=str(enabled / "demo-app.conf")),
+        db_path=db.path,
+        project_root=project_root,
+        enabled_root=enabled,
+    )
+    assert exit_code == (1 if failure else 0)
+    assert response["ok"] is (not failure)
+    assert list(enabled.iterdir()) == [link]
+    assert link.resolve() == (old if failure else target)
+    assert db.get_project_selection("demo-app").nginx_config_path == str(old)
+
+
+@pytest.mark.parametrize("state", ["duplicate", "unmanaged", "foreign", "file", "stale"])
+def test_config_switch_rejects_conflicting_or_stale_enabled_state(monkeypatch, tmp_path, state):
+    project_root, project, old, db = create_repo_project(tmp_path)
+    target = project / "stage.nginx"
+    target.write_text("server { listen 80; server_name stage.example.com; }")
+    enabled = tmp_path / "enabled"
+    enabled.mkdir()
+    if state == "file":
+        (enabled / "demo-app.conf").write_text("keep")
+    elif state == "foreign":
+        foreign = tmp_path / "foreign.nginx"
+        foreign.write_text("keep")
+        (enabled / "demo-app.conf").symlink_to(foreign)
+    else:
+        (enabled / ("unmanaged" if state == "unmanaged" else "demo-app")).symlink_to(old)
+        if state == "duplicate":
+            (enabled / "demo-app.conf").symlink_to(target)
+    action_id = db.create_action(
+        action_type="helper-activate-config",
+        subcommand="activate-config",
+        target=str(target),
+        project="demo-app",
+        config_path=target,
+        expected_file=target,
+        parameters={
+            "switch_config": True,
+            "previous_selection": str(target if state == "stale" else old),
+            "previous_active_config": str(old),
+        },
+    )
+    before = [(path.name, path.readlink() if path.is_symlink() else path.read_text()) for path in enabled.iterdir()]
+    code, response = handle_helper_request(
+        "activate-config",
+        request_payload(action_id, "activate-config", target, link_path=str(enabled / "demo-app.conf")),
+        db_path=db.path,
+        project_root=project_root,
+        enabled_root=enabled,
+    )
+    assert code == 1
+    assert not response["ok"]
+    assert [
+        (path.name, path.readlink() if path.is_symlink() else path.read_text()) for path in enabled.iterdir()
+    ] == before
+
+
+def test_plain_activation_and_deactivation_reuse_existing_legacy_link(tmp_path):
+    project_root, _, config, db = create_repo_project(tmp_path)
+    enabled = tmp_path / "enabled"
+    enabled.mkdir()
+    legacy = enabled / "demo-app"
+    legacy.symlink_to(config)
+    for subcommand in ("activate-config", "deactivate-config"):
+        action_id = create_action(db, subcommand, config)
+        code, _ = handle_helper_request(
+            subcommand,
+            request_payload(action_id, subcommand, config, link_path=str(enabled / "demo-app.conf")),
+            db_path=db.path,
+            project_root=project_root,
+            enabled_root=enabled,
+        )
+        assert code == 0
+        assert not (enabled / "demo-app.conf").exists()
+        db.finish_action(action_id, status="succeeded")
+    assert not legacy.exists()
+
+
+def test_activation_cannot_enable_switching_by_untrusted_payload(tmp_path):
+    project_root, project, old, db = create_repo_project(tmp_path)
+    target = project / "stage.nginx"
+    target.write_text("server { listen 80; server_name stage.example.com; }")
+    enabled = tmp_path / "enabled"
+    enabled.mkdir()
+    (enabled / "demo-app.conf").symlink_to(old)
+    action_id = create_action(db, "activate-config", target)
+    code, response = handle_helper_request(
+        "activate-config",
+        request_payload(
+            action_id,
+            "activate-config",
+            target,
+            link_path=str(enabled / "demo-app.conf"),
+            switch_config=True,
+            previous_selection=str(old),
+            previous_active_config=str(old),
+        ),
+        db_path=db.path,
+        project_root=project_root,
+        enabled_root=enabled,
+    )
+    assert code == 1
+    assert "saved project Nginx selection" in response["error"]
+    assert (enabled / "demo-app.conf").resolve() == old

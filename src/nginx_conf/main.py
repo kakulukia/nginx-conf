@@ -1,6 +1,7 @@
 import json
 import uuid
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -125,6 +126,7 @@ PUBLIC_PATHS = {
     "/static/app.css",
     "/static/styleguide.css",
     "/static/otp.js",
+    "/static/select.js",
     "/static/favicon.svg",
     "/static/fonts/source-code-pro-regular.woff2",
     "/static/fonts/source-code-pro-bold.woff2",
@@ -180,11 +182,8 @@ def get_command_runner(db: AppDatabase) -> CommandRunner:
 def find_config_or_404(project_name: str, config_name: str, root: Path | None = None) -> NginxConfig:
     if root is None:
         root = PROJECT_ROOT
-    for config in load_configs(root):
-        if config.project_name == project_name and config.config_path.name == config_name:
-            return config
-
-    raise HTTPException(status_code=404, detail="Config not found")
+    configs = [config for config in load_configs(root) if config.project_name == project_name]
+    return _named_config_or_404(configs, project_name, config_name)
 
 
 def find_project_or_404(project_name: str):
@@ -401,7 +400,32 @@ def _projects_page(request: Request, *, title: str, project_name: str | None = N
     database = get_database()
     project_choices = build_project_choice_states(inventory.projects, database)
     choices_by_project = {choice.project_name: choice for choice in project_choices}
-    ssl_inventory = discover_ssl_inventory(inventory.projects, letsencrypt_root=LETSENCRYPT_ROOT)
+    display_configs_by_project = {
+        project.project_name: tuple(config for config in project.configs if config.enabled)
+        or tuple(
+            config
+            for config in project.configs
+            if config.config_path == choices_by_project[project.project_name].selected_nginx_config
+        )
+        for project in inventory.projects
+    }
+    selected_projects = tuple(
+        replace(
+            project,
+            domains=tuple(
+                sorted(
+                    {
+                        name
+                        for config in display_configs_by_project[project.project_name]
+                        for block in config.server_blocks
+                        for name in block.server_names
+                    }
+                )
+            ),
+        )
+        for project in inventory.projects
+    )
+    ssl_inventory = discover_ssl_inventory(selected_projects, letsencrypt_root=LETSENCRYPT_ROOT)
     renewal_status = inspect_certbot_renewal()
     allowed_hosts_inventory = check_django_allowed_hosts(inventory.projects)
     django_deploy_statuses = {
@@ -424,9 +448,7 @@ def _projects_page(request: Request, *, title: str, project_name: str | None = N
     for project in inventory.projects:
         choice = choices_by_project[project.project_name]
         active_configs = [config for config in project.configs if config.enabled]
-        display_configs = active_configs or [
-            config for config in project.configs if config.config_path == choice.selected_nginx_config
-        ]
+        display_configs = display_configs_by_project[project.project_name]
         domains = sorted(
             {name for config in display_configs for block in config.server_blocks for name in block.server_names}
         )
@@ -440,7 +462,7 @@ def _projects_page(request: Request, *, title: str, project_name: str | None = N
             or not any(config.config_path == choice.selected_nginx_config for config in active_configs)
             or git_status.error
             or git_status.repo_dirty
-            or any(allowed_hosts_warnings.get(config.config_path) for config in project.configs)
+            or any(allowed_hosts_warnings.get(config.config_path) for config in display_configs)
             or (ssl_status and any(domain.state != "valid" for domain in ssl_status.domains))
             or pm2_status.error
             or any(process.warning or process.status != "online" for process in processes)
@@ -932,9 +954,7 @@ def project_git_reset_api(project_name: str) -> dict[str, object]:
 
 @app.post("/api/projects/{project_name}/selection")
 async def save_project_selection_api(project_name: str, request: Request) -> dict[str, object]:
-    payload = await request.json()
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="JSON object expected")
+    payload = await _request_payload(request)
 
     project = find_project_or_404(project_name)
     try:
@@ -946,7 +966,73 @@ async def save_project_selection_api(project_name: str, request: Request) -> dic
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    except ActionLockError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     return project_choice_to_dict(choice)
+
+
+@app.post("/api/projects/{project_name}/config-selection")
+async def switch_project_config_api(project_name: str, request: Request) -> dict[str, object]:
+    payload = await _request_payload(request)
+    db = get_database()
+    project, _choice = find_choice_or_404(project_name, db)
+    config_path = payload.get("nginx_config_path")
+    config = next((item for item in project.configs if str(item.config_path) == config_path), None)
+    if config is None:
+        raise HTTPException(status_code=400, detail="Bitte eine vorhandene Config dieses Projekts auswählen.")
+    active = [item for item in project.configs if item.enabled]
+    if len(active) > 1:
+        raise HTTPException(status_code=409, detail="Mehrere Configs sind aktiv. Bitte die enabled-Symlinks bereinigen.")
+    saved = db.get_project_selection(project_name)
+    action_id = str(uuid.uuid4())
+    command = helper_command(
+        subcommand="activate-config",
+        action_id=action_id,
+        project=project_name,
+        config_path=config.config_path,
+        expected_file=config.config_path,
+        payload={
+            "link_path": str(SITES_ENABLED_ROOT / f"{project_name}.conf"),
+            "switch_config": True,
+            "previous_selection": saved.nginx_config_path if saved else None,
+            "previous_active_config": str(active[0].config_path) if active else None,
+        },
+    )
+    service = get_system_action_service(db)
+
+    def save_selection() -> None:
+        try:
+            db.save_project_selection(
+                project_name,
+                nginx_config_path=config.config_path,
+                pm2_start_script_path=saved.pm2_start_script_path if saved else None,
+                action_id=action_id,
+            )
+        except Exception:
+            rollback = service.runner.run(
+                command.argv,
+                stdin=json.dumps({**command.stdin_json, "rollback": True}),
+                timeout_seconds=command.timeout_seconds,
+            )
+            if rollback.exit_code != 0:
+                raise RuntimeError(
+                    "Auswahl konnte nicht gespeichert und die bisherige Config nicht wiederhergestellt werden."
+                )
+            raise
+
+    try:
+        result = service.run(command, action_id=action_id, on_success=save_selection)
+    except ActionLockError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(
+            status_code=500, detail="Config-Auswahl konnte nicht gespeichert werden. Bitte Ergebnis prüfen."
+        ) from error
+    db.set_ui_state(
+        "nginx.last_test",
+        {"ok": result.result.exit_code == 0, "action_id": result.action_id, "exit_code": result.result.exit_code},
+    )
+    return _system_action_result_to_dict(result)
 
 
 @app.get("/configs/{project_name}/{config_name}", response_class=HTMLResponse)
@@ -1000,7 +1086,10 @@ def _blank_to_none(value) -> str | None:
 async def _request_payload(request: Request) -> dict[str, object]:
     content_type = request.headers.get("content-type", "")
     if "application/json" in content_type:
-        payload = await request.json()
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError as error:
+            raise HTTPException(status_code=400, detail="Ungültiges JSON.") from error
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="JSON object expected")
         return payload
@@ -1192,9 +1281,16 @@ def _find_choice_in_inventory_or_404(project_name: str, inventory, db: AppDataba
 
 
 def _find_config_in_project_or_404(project, config_name: str) -> NginxConfig:
-    for config in project.configs:
-        if config.config_path.name == config_name:
-            return config
+    return _named_config_or_404(project.configs, project.project_name, config_name)
+
+
+def _named_config_or_404(configs, project_name: str, config_name: str) -> NginxConfig:
+    matches = [config for config in configs if config.config_path.name == config_name]
+    if len(matches) > 1:
+        saved = get_database().get_project_selection(project_name)
+        matches = [config for config in matches if saved and str(config.config_path) == saved.nginx_config_path]
+    if len(matches) == 1:
+        return matches[0]
     raise HTTPException(status_code=404, detail="Config not found")
 
 
@@ -1218,7 +1314,7 @@ def _validate_certbot_server_block(inventory, project, config: NginxConfig, bloc
     selected_domains = set(block.server_names)
     for candidate_project in inventory.projects:
         for candidate_config in candidate_project.configs:
-            if candidate_config.config_path.resolve() == selected_path:
+            if not candidate_config.enabled or candidate_config.config_path.resolve() == selected_path:
                 continue
             for candidate_block in candidate_config.domain_groups:
                 overlapping = selected_domains.intersection(candidate_block.server_names)

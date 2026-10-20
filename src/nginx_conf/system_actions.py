@@ -6,7 +6,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 from nginx_conf.github_clone import GitHubClonePlan
 from nginx_conf.store import AppDatabase
@@ -139,7 +139,13 @@ class SystemActionService:
             parameters=command.parameters or {},
         )
 
-    def run(self, command: CommandSpec, *, action_id: str | None = None) -> SystemActionResult:
+    def run(
+        self,
+        command: CommandSpec,
+        *,
+        action_id: str | None = None,
+        on_success: Callable[[], None] | None = None,
+    ) -> SystemActionResult:
         action_id = self.start_background_action(command, action_id=action_id)
         stdin = json.dumps(command.stdin_json, sort_keys=True) if command.stdin_json is not None else None
         if command.action_type == "certbot-issue":
@@ -155,6 +161,8 @@ class SystemActionService:
         try:
             self.db.mark_action_running(action_id)
             result = self.runner.run(command.argv, stdin=stdin, timeout_seconds=command.timeout_seconds)
+            if result.exit_code == 0 and on_success is not None:
+                on_success()
         except Exception as error:
             self.db.finish_action(
                 action_id,
@@ -370,7 +378,16 @@ def helper_command(
         project=project,
         config_path=config_path,
         expected_file=expected_file,
-        parameters={"action_id": action_id, "project": project, "expected_file": str(expected_file)},
+        parameters={
+            "action_id": action_id,
+            "project": project,
+            "expected_file": str(expected_file),
+            **(
+                {key: payload[key] for key in ("switch_config", "previous_selection", "previous_active_config")}
+                if subcommand == "activate-config" and payload.get("switch_config") is True
+                else {}
+            ),
+        },
         stdin_json=request_payload,
         timeout_seconds=LONG_RUNNING_TIMEOUT_SECONDS,
     )

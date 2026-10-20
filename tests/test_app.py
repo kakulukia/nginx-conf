@@ -181,6 +181,7 @@ def test_home_page(monkeypatch, tmp_path) -> None:
     assert 'class="nc-table app-project-table"' in response.text
     assert "nginx -t" in response.text
     assert "/api/projects/clone" in response.text
+    assert '<a href="/" aria-current="page">Projekte</a>' in response.text
 
 
 def test_header_actions_stay_locked_while_another_action_runs(monkeypatch, tmp_path) -> None:
@@ -218,6 +219,7 @@ def test_project_page_keeps_details_out_of_overview_and_scopes_projects(monkeypa
     assert details.status_code == 200
     assert "/configs/demo-app/app.nginx" in details.text
     assert "Nginx-Auswahl" in details.text
+    assert '<a href="/" aria-current="page">Projekte</a>' not in details.text
     assert "Nginx-Block" not in details.text
     assert details.text.count("Django ALLOWED_HOSTS fehlt") == 1
     assert details.text.count("Zertifikat ausstellen") == 1
@@ -493,6 +495,7 @@ def test_configs_index_shows_demo_config(monkeypatch, tmp_path) -> None:
     response = client.get("/configs")
 
     assert response.status_code == 200
+    assert '<a href="/" aria-current="page">Projekte</a>' in response.text
     assert 'href="/projects/demo-app"' in response.text
     assert "www.demo.local" in response.text
     assert "+.nginx" in client.get("/projects/demo-app").text
@@ -1724,3 +1727,143 @@ def test_expired_enrollment_returns_to_password_login(monkeypatch, tmp_path) -> 
     assert page.status_code == 401 and "abgelaufen" in page.text
     assert "<svg" not in page.text and auth.ENROLLMENT_COOKIE_NAME not in browser.cookies
     assert db.get_auth_credentials().totp_secret == ""
+
+
+@pytest.mark.parametrize("failure", [None, "nginx", "save"])
+@pytest.mark.parametrize("initially_active", [False, True])
+def test_config_selection_switches_and_saves_under_action_lock(monkeypatch, tmp_path, failure, initially_active):
+    from nginx_conf import helper as helper_module
+
+    project, enabled, old = configure_git_project_roots(monkeypatch, tmp_path)
+    target = project / "stage/app.nginx"
+    target.parent.mkdir()
+    target.write_text("server { listen 80; server_name stage.example.com; }")
+    link = enabled / "demo-app"
+    if initially_active:
+        link.symlink_to(old)
+    db = AppDatabase(main.DATABASE_PATH)
+    original_run = subprocess.run
+
+    def run(argv, **kwargs):
+        if argv == ("/usr/sbin/nginx", "-t"):
+            assert db.get_active_action() is not None
+            assert db.get_project_selection("demo-app").nginx_config_path == str(old)
+            with pytest.raises(ActionLockError):
+                db.create_action(action_type="nginx-reload", target="nginx")
+            return subprocess.CompletedProcess(argv, 1 if failure == "nginx" else 0, "", "test output")
+        return original_run(argv, **kwargs)
+
+    monkeypatch.setattr(helper_module.subprocess, "run", run)
+
+    class Runner:
+        def run(self, argv, *, stdin, timeout_seconds):
+            code, response = handle_helper_request(
+                argv[1],
+                stdin,
+                db_path=main.DATABASE_PATH,
+                project_root=project.parent,
+                enabled_root=enabled,
+            )
+            return CommandResult(code, json.dumps(response), "")
+
+    monkeypatch.setattr(
+        main, "get_system_action_service", lambda database: SystemActionService(database, runner=Runner())
+    )
+    original_save = AppDatabase.save_project_selection
+
+    def save(database, *args, **kwargs):
+        assert database.get_active_action().action_id == kwargs["action_id"]
+        if failure == "save":
+            raise RuntimeError("storage failed")
+        return original_save(database, *args, **kwargs)
+
+    monkeypatch.setattr(AppDatabase, "save_project_selection", save)
+    response = client.post("/api/projects/demo-app/config-selection", data={"nginx_config_path": str(target)})
+    assert response.status_code == (500 if failure == "save" else 200)
+    active_links = list(enabled.iterdir())
+    if failure:
+        assert db.get_project_selection("demo-app").nginx_config_path == str(old)
+        assert [item.resolve() for item in active_links] == ([old] if initially_active else [])
+        if failure == "nginx":
+            assert response.json()["ok"] is False
+    else:
+        assert response.json()["ok"] is True
+        assert db.get_project_selection("demo-app").nginx_config_path == str(target)
+        assert [item.resolve() for item in active_links] == [target]
+        assert db.get_ui_state("nginx.last_test")["ok"] is True
+        detail = client.get("/configs/demo-app/app.nginx")
+        assert detail.status_code == 200
+        assert "stage.example.com" in detail.text
+        assert "old.example.com" not in detail.text
+    assert db.get_active_action() is None
+
+
+@pytest.mark.parametrize("value", [None, "", "../outside.nginx", [], {}])
+def test_config_selection_rejects_invalid_input_without_changes(monkeypatch, tmp_path, value):
+    project, enabled, old = configure_git_project_roots(monkeypatch, tmp_path)
+    response = client.post("/api/projects/demo-app/config-selection", json={"nginx_config_path": value})
+    assert response.status_code == 400
+    assert list(enabled.iterdir()) == []
+    assert AppDatabase(main.DATABASE_PATH).get_project_selection("demo-app").nginx_config_path == str(old)
+
+
+def test_config_selection_rejects_malformed_json_and_running_action(monkeypatch, tmp_path):
+    _, _, config = configure_git_project_roots(monkeypatch, tmp_path)
+    response = client.post(
+        "/api/projects/demo-app/config-selection", content="{", headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 400
+    db = AppDatabase(main.DATABASE_PATH)
+    action = db.create_action(action_type="nginx-test", target="nginx")
+    response = client.post("/api/projects/demo-app/config-selection", json={"nginx_config_path": str(config)})
+    assert response.status_code == 409
+    response = client.post("/api/projects/demo-app/selection", json={"nginx_config_path": str(config)})
+    assert response.status_code == 409
+    assert db.get_active_action().action_id == action
+
+
+def test_project_detail_has_one_config_dropdown_and_selected_details(monkeypatch, tmp_path):
+    project, enabled, config = configure_git_project_roots(monkeypatch, tmp_path)
+    other = project / "other.nginx"
+    other.write_text("server { listen 80; server_name unused.example.com; }")
+    (enabled / "demo-app").symlink_to(config)
+    response = client.get("/projects/demo-app")
+    assert response.status_code == 200
+    assert 'id="project-nginx-config"' in response.text
+    assert 'name="nginx_config_path" autocomplete="off"' in response.text
+    assert f'<option value="{config}" selected>' in response.text
+    assert f'<option value="{other}">' in response.text
+    assert "/other.nginx/activate" not in response.text
+    assert "unused.example.com" not in response.text
+    assert "Deaktivieren" in response.text
+    assert '<a href="/" aria-current="page">Projekte</a>' not in response.text
+
+
+def test_legacy_selection_cannot_bypass_switch_for_active_config(monkeypatch, tmp_path):
+    project, enabled, config = configure_git_project_roots(monkeypatch, tmp_path)
+    other = project / "other.nginx"
+    other.write_text("server { listen 80; server_name other.example.com; }")
+    (enabled / "demo-app").symlink_to(config)
+    response = client.post("/api/projects/demo-app/selection", json={"nginx_config_path": str(other)})
+    assert response.status_code == 400
+    assert AppDatabase(main.DATABASE_PATH).get_project_selection("demo-app").nginx_config_path == str(config)
+    (enabled / "demo-app.conf").symlink_to(other)
+    response = client.post("/api/projects/demo-app/config-selection", json={"nginx_config_path": str(other)})
+    assert response.status_code == 409
+    assert AppDatabase(main.DATABASE_PATH).get_project_selection("demo-app").nginx_config_path == str(config)
+
+
+def test_certbot_conflicts_ignore_inactive_alternative_configs(monkeypatch, tmp_path):
+    from fastapi import HTTPException
+
+    project, enabled, config = configure_git_project_roots(monkeypatch, tmp_path)
+    other = project / "other.nginx"
+    other.write_text(config.read_text())
+    (enabled / "demo-app").symlink_to(config)
+    inventory = main.load_inventory()
+    selected = next(item for item in inventory.projects[0].configs if item.config_path == config)
+    main._validate_certbot_server_block(inventory, inventory.projects[0], selected, selected.domain_groups[0])
+    (enabled / "duplicate").symlink_to(other)
+    inventory = main.load_inventory()
+    with pytest.raises(HTTPException, match="conflicts with another config"):
+        main._validate_certbot_server_block(inventory, inventory.projects[0], selected, selected.domain_groups[0])

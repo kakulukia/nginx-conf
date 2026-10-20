@@ -161,7 +161,7 @@ def test_discover_inventory_reports_broken_enabled_symlink(tmp_path: Path) -> No
     assert inventory.projects[0].configs[0].enabled is False
 
 
-def test_discover_inventory_reports_duplicate_domains_and_ports(tmp_path: Path) -> None:
+def test_discover_inventory_reports_duplicate_domains_only_for_active_configs(tmp_path: Path) -> None:
     root = tmp_path / "opt/www"
     enabled_root = tmp_path / "etc/nginx/sites-enabled"
     enabled_root.mkdir(parents=True)
@@ -173,12 +173,15 @@ def test_discover_inventory_reports_duplicate_domains_and_ports(tmp_path: Path) 
     (first_project / "app.nginx").write_text("server { listen 8080; server_name clash.example.com; }", encoding="utf-8")
     (second_project / "app.nginx").write_text("server { listen 8080; server_name clash.example.com; }", encoding="utf-8")
 
+    assert all(not project.issues for project in discover_inventory(root, enabled_root).projects)
+    for project in (first_project, second_project):
+        (enabled_root / project.name).symlink_to(project / "app.nginx")
     inventory = discover_inventory(root, enabled_root)
 
     assert "duplicate_domain" in issue_codes(inventory.projects[0].issues)
-    assert "duplicate_listen_port" in issue_codes(inventory.projects[0].issues)
+    assert "duplicate_listen_port" not in issue_codes(inventory.projects[0].issues)
     assert "duplicate_domain" in issue_codes(inventory.projects[1].issues)
-    assert "duplicate_listen_port" in issue_codes(inventory.projects[1].issues)
+    assert "duplicate_listen_port" not in issue_codes(inventory.projects[1].issues)
 
 
 def test_http_https_pair_is_one_domain_group_without_duplicate_conflicts(tmp_path: Path) -> None:
@@ -200,8 +203,10 @@ def test_http_https_pair_is_one_domain_group_without_duplicate_conflicts(tmp_pat
     assert certificate_server_group(discovered.server_blocks, ("demo.example.com", "www.demo.example.com")) is not None
 
 
-def test_http_https_port_conflicts_with_same_configs_are_summarized(tmp_path: Path) -> None:
+def test_active_virtual_hosts_can_share_http_https_ports(tmp_path: Path) -> None:
     root = tmp_path / "www"
+    enabled = tmp_path / "enabled"
+    enabled.mkdir()
     for name in ("first", "second"):
         project = root / name
         project.mkdir(parents=True)
@@ -209,12 +214,10 @@ def test_http_https_port_conflicts_with_same_configs_are_summarized(tmp_path: Pa
             f"server {{ listen 80; server_name {name}.example.com; }}\n"
             f"server {{ listen 443 ssl; server_name {name}.example.com; }}\n"
         )
-    inventory = discover_inventory(root, tmp_path / "enabled")
+        (enabled / name).symlink_to(project / "app.nginx")
+    inventory = discover_inventory(root, enabled)
     for project in inventory.projects:
-        port_issues = [issue for issue in project.issues if issue.code == "duplicate_listen_port"]
-        assert len(port_issues) == 1
-        assert port_issues[0].subject == "80, 443"
-        assert "duplicate_domain" not in issue_codes(project.issues)
+        assert not project.issues
 
 
 @pytest.mark.parametrize(
@@ -233,8 +236,70 @@ def test_domain_group_preserves_real_config_conflicts(tmp_path: Path, extra: str
         "server { listen 80; server_name demo.example.com; }\n"
         "server { listen 443 ssl; server_name demo.example.com; }\n" + extra
     )
-    inventory = discover_inventory(project.parent, tmp_path / "enabled")
+    enabled = tmp_path / "enabled"
+    enabled.mkdir()
+    (enabled / "demo-app").symlink_to(config)
+    inventory = discover_inventory(project.parent, enabled)
     discovered = inventory.projects[0].configs[0]
     assert "duplicate_domain" in issue_codes(inventory.projects[0].issues)
-    assert "duplicate_listen_port" in issue_codes(inventory.projects[0].issues)
+    assert "duplicate_listen_port" not in issue_codes(inventory.projects[0].issues)
     assert certificate_server_group(discovered.server_blocks, ("demo.example.com",)) is None
+
+
+def test_config_search_skips_venv_before_symlink_checks_but_keeps_hidden_configs(tmp_path: Path) -> None:
+    project = tmp_path / "www/demo"
+    (project / ".venv/lib").mkdir(parents=True)
+    (project / ".venv/lib64").symlink_to("lib", target_is_directory=True)
+    (project / ".venv/dependency.nginx").write_text("server { listen 80; server_name ignored.example.com; }")
+    (project / ".nginx").mkdir()
+    config = project / ".nginx/stage.nginx"
+    config.write_text("server { listen 80; server_name stage.example.com; }")
+    (project / ".gitignore").write_text(".nginx/\n")
+    inventory = discover_inventory(project.parent, tmp_path / "enabled")
+    assert [item.config_path for item in inventory.projects[0].configs] == [config]
+    assert not inventory.projects[0].issues
+
+
+def test_multiple_active_configs_of_one_project_are_reported(tmp_path: Path) -> None:
+    project = tmp_path / "www/demo"
+    project.mkdir(parents=True)
+    enabled = tmp_path / "enabled"
+    enabled.mkdir()
+    for name in ("stage", "live"):
+        config = project / f"{name}.nginx"
+        config.write_text(f"server {{ listen 80; server_name {name}.example.com; }}")
+        (enabled / name).symlink_to(config)
+    inventory = discover_inventory(project.parent, enabled)
+    assert "multiple_active_configs" in issue_codes(inventory.projects[0].issues)
+
+
+def test_config_search_excludes_top_level_venv_project(tmp_path):
+    root = tmp_path / "www"
+    (root / ".venv").mkdir(parents=True)
+    (root / ".venv/app.nginx").write_text("server { listen 80; server_name ignored.example.com; }")
+    assert find_project_configs(root) == []
+    assert discover_inventory(root, tmp_path / "enabled").projects == ()
+
+
+@pytest.mark.parametrize("state", ["own", "own-relative", "foreign-target", "foreign-name", "broken", "directory"])
+def test_admin_site_is_exempt_only_for_intact_known_enabled_link(tmp_path, state):
+    root = tmp_path / "www"
+    root.mkdir()
+    nginx = tmp_path / "etc/nginx"
+    enabled = nginx / "sites-enabled"
+    available = nginx / "sites-available"
+    enabled.mkdir(parents=True)
+    available.mkdir()
+    target = available / ("other" if state == "foreign-target" else "nginx-conf")
+    if state == "directory":
+        target.mkdir()
+    elif state != "broken":
+        target.write_text("server { listen 80; server_name config.pepperz.de; }")
+    raw_target = Path("../sites-available/nginx-conf") if state == "own-relative" else target
+    (enabled / ("other" if state == "foreign-name" else "nginx-conf")).symlink_to(raw_target)
+    inventory = discover_inventory(root, enabled)
+    if state in {"own", "own-relative"}:
+        assert not inventory.issues
+    else:
+        expected = "broken_enabled_symlink" if state == "broken" else "foreign_enabled_symlink"
+        assert issue_codes(inventory.issues) == {expected}

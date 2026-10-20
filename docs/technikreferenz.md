@@ -17,7 +17,8 @@ alle wichtigen Betriebsinformationen sichtbar sein:
 - Domains aus `server_name`
 - Aktivstatus der Configs
 - Symlink-Ziel in `/etc/nginx/sites-enabled`
-- Konflikte wie doppelte Domains, doppelte Ports oder kaputte Symlinks
+- Konflikte wie doppelte Domains aktiver Configs, mehrere aktive Configs eines
+  Projekts oder kaputte Symlinks. Gemeinsame Listen-Ports sind erlaubt.
 - SSL-Zertifikatsstatus pro Domain
 - Ablaufdatum und relative Ablaufnaehe, z.B. "in zwei Monaten"
 - laufende App-Prozesse und ihr Status
@@ -90,6 +91,13 @@ bereits gespeicherte Auswahl verwenden.
   `/projects/{project_name}`. Configs, Auswahl, Git, SSL, Django und PM2 stehen
   auf dieser Projektseite. Übergreifende Serverhinweise bleiben auf der
   Startseite eingeklappt erreichbar. `/configs` zeigt ebenfalls die Übersicht.
+- Die eigene Verwaltungsseite ist kein verwaltetes Projekt. Der intakte
+  Symlink `sites-enabled/nginx-conf` auf `sites-available/nginx-conf` erzeugt
+  deshalb keinen Hinweis auf eine fremde Projektconfig. Certbot-Zertifikate,
+  die ausschließlich `config.pepperz.de` abdecken, erzeugen keinen Hinweis auf
+  fehlende Projektzuordnung. Andere Symlink-Ziele, kaputte Verweise und
+  Zertifikate mit weiteren fremden Domains bleiben in der Diagnose enthalten.
+  Der vollständige Nginx-Konfigurationstest wird dadurch nicht eingeschränkt.
 - Vollständige JSON-Objekte und Arrays in Aktionsausgaben werden mit Einrückung
   und Zeilenumbrüchen angezeigt. Klartext und abgeschnittenes JSON bleiben
   unverändert; gespeicherte Ergebnisse und API-Antworten ändern sich nicht.
@@ -256,9 +264,25 @@ aktuellen Projekt-Datensatz gilt. Eindeutige Einzelfaelle duerfen automatisch
 verwendet werden; mehrdeutige Faelle bleiben als "Auswahl erforderlich"
 sichtbar. Die Auswahl wird in SQLite gespeichert, nicht im Projektordner.
 
+Pro Projekt darf höchstens eine Config aktiv sein. Die Projektseite bietet eine
+Config-Auswahl mit Übernehmen statt unabhängiger Aktivieren-Buttons. Der
+kontrollierte Helper ersetzt den bestehenden Projekt-Symlink atomar und prüft
+mit `nginx -t`. Bei einem Fehler stellt er den bisherigen Verweis wieder her.
+Die App speichert die neue Auswahl erst nach erfolgreicher Prüfung, während
+die globale Aktionssperre noch gehalten wird. Schlägt das Speichern fehl,
+fordert sie die Wiederherstellung beim Helper an. Nginx wird separat neu
+geladen. Bestehende Namen `<projekt>` und `<projekt>.conf` werden unterstützt;
+mehrere oder fremde enabled-Verweise werden nicht stillschweigend verändert.
+Die Config-Auswahl verwendet `autocomplete="off"`, damit Firefox nach einem
+Neuladen den gespeicherten Stand statt einer zuvor abgelehnten Auswahl zeigt.
+
 Die Kandidatenerkennung bleibt bewusst simpel: Eine Nginx-Config ist im MVP
 eine Datei, deren Name auf `.nginx` endet und die irgendwo unterhalb des
-Projektordners liegt. Dateien wie `nginx.conf`, `nginx.config`,
+Projektordners liegt, ausgenommen Verzeichnisse namens `.venv`. Diese werden
+vor dem Betreten aus der Suche entfernt, einschließlich ihrer Symlinks. Andere
+versteckte oder Git-ignorierte Configs bleiben auffindbar. Die bestehende
+Python-Suche benötigt dafür kein zusätzlich installiertes `fd`.
+Dateien wie `nginx.conf`, `nginx.config`,
 `*.nginx-plesk-config` oder alte Plesk-/Snippet-Konfigurationen werden nicht
 als Projekt-Config erkannt. Wenn keine `*.nginx`-Datei gefunden wird, zeigt die
 App das Projekt als unvollstaendig, z.B. "Keine Nginx-Konfiguration gefunden.

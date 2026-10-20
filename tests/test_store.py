@@ -250,3 +250,14 @@ def test_schema_has_no_full_config_diff_or_file_hash_columns(tmp_path: Path) -> 
         }
 
     assert forbidden_columns.isdisjoint(column_names)
+
+
+def test_project_selection_cannot_change_during_another_action(tmp_path):
+    db = make_db(tmp_path)
+    action_id = db.create_action(action_type="helper-activate-config", target="config")
+    with pytest.raises(ActionLockError):
+        db.save_project_selection("demo", nginx_config_path="/opt/www/demo/app.nginx", pm2_start_script_path=None)
+    db.save_project_selection(
+        "demo", nginx_config_path="/opt/www/demo/app.nginx", pm2_start_script_path=None, action_id=action_id
+    )
+    assert db.get_project_selection("demo").nginx_config_path == "/opt/www/demo/app.nginx"

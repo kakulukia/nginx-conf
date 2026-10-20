@@ -2,8 +2,23 @@
   <h2 class="nc-heading">Konfigurationen</h2>
   {% set choice = project_choices.get(project.project_name) if project_choices is defined else none %}
   {% if project.configs %}
+    <form class="app-inline-form" action="/api/projects/{{ project.project_name }}/config-selection" method="post" data-app-action data-error-target="config-selection-error">
+      <label class="app-field" for="project-nginx-config">
+        <span class="nc-label">Nginx-Config</span>
+        <select class="nc-input" id="project-nginx-config" name="nginx_config_path" autocomplete="off" required{% if active_action %} disabled{% endif %}>
+          <option value=""{% if not choice or not choice.selected_nginx_config %} selected{% endif %} disabled>Bitte auswählen</option>
+          {% for config in project.configs %}
+            <option value="{{ config.config_path }}"{% if choice and config.config_path == choice.selected_nginx_config %} selected{% endif %}>{{ config.config_path.relative_to(project.project_path) }}{% if config.enabled %} (aktiv){% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="nc-button" type="submit"{% if active_action %} disabled{% endif %}>Übernehmen</button>
+    </form>
+    <p class="nc-text nc-text--small app-meta">Pro Projekt kann eine Config aktiv sein. Übernehmen prüft und aktiviert die Auswahl. Nginx danach über das Menü neu laden.</p>
+    <p class="nc-text nc-status--error" id="config-selection-error" role="alert" hidden></p>
     <ul class="app-config-list">
       {% for config in project.configs %}
+        {% if choice and config.config_path == choice.selected_nginx_config %}
         <li class="app-config">
           <div class="app-config__header">
           <a href="/configs/{{ config.project_name }}/{{ config.config_path.name }}">
@@ -14,14 +29,11 @@
           {% else %}
             <span class="nc-status">nicht aktiv</span>
           {% endif %}
-          <form
-            action="/api/projects/{{ config.project_name }}/configs/{{ config.config_path.name }}/{% if config.enabled %}deactivate{% else %}activate{% endif %}"
-            method="post"
-          >
-            <button class="nc-button{% if config.enabled %} nc-button--danger{% endif %}" type="submit"{% if active_action %} disabled{% endif %}>
-              {% if config.enabled %}Deaktivieren{% else %}Aktivieren{% endif %}
-            </button>
-          </form>
+          {% if config.enabled %}
+            <form action="/api/projects/{{ config.project_name }}/configs/{{ config.config_path.name }}/deactivate" method="post" data-app-action data-error-target="config-selection-error">
+              <button class="nc-button nc-button--danger" type="submit"{% if active_action %} disabled{% endif %}>Deaktivieren</button>
+            </form>
+          {% endif %}
           </div>
           {% for block in config.domain_groups %}
             <div class="nc-text nc-text--small app-meta">
@@ -62,6 +74,7 @@
             <div class="nc-text nc-text--small app-meta">{{ link.link_path }} -> {{ link.raw_target }}</div>
           {% endfor %}
         </li>
+        {% endif %}
       {% endfor %}
     </ul>
   {% else %}

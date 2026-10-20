@@ -25,6 +25,7 @@ def test_styleguide_requires_session_and_renders_dark_desktop_examples(monkeypat
     classes = {name for attribute in re.findall(r'class="([^"]*)"', page.text) for name in attribute.split()}
     assert "nc-theme-dark" in classes
     assert "nc-theme-light" not in classes
+    assert '/static/select.js" defer' in page.text
     assert 'aria-invalid="true"' in page.text
     assert 'src="https://' not in page.text
     assert "Gravity" not in browser.get("/static/styleguide.css").text
@@ -41,6 +42,9 @@ def test_styleguide_only_exposes_allowed_assets_without_a_session(monkeypatch, t
     assert ".nc-input" in app_css.text
     script = browser.get("/static/otp.js")
     assert script.status_code == 200 and "javascript" in script.headers["content-type"]
+    select_script = browser.get("/static/select.js")
+    assert select_script.status_code == 200 and "javascript" in select_script.headers["content-type"]
+    assert "base-select" in select_script.text
     assert browser.get("/static/unknown.js").status_code == 303
     for weight in ("regular", "bold"):
         font = browser.get(f"/static/fonts/source-code-pro-{weight}.woff2")

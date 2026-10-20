@@ -19,6 +19,11 @@
   border-radius: 0
 
 html, .nc-scroll, .nc-textarea, .nc-suggestions, .nc-code, .nc-dialog
+  scrollbar-width: thin
+  scrollbar-color: var(--nc-fg2) var(--nc-bg)
+  @supports selector(::-webkit-scrollbar)
+    scrollbar-width: auto
+    scrollbar-color: auto
   &::-webkit-scrollbar
     width: 8px
     height: 8px
@@ -96,7 +101,7 @@ a
   color: var(--nc-fg)
   font-size: 15px
   transition: padding-inline 180ms ease, background-color 180ms ease, border-color 180ms ease
-  &:is(:focus, :open)
+  &:is(:focus, :open, [aria-expanded="true"])
     outline: none
     padding-inline: 12px
     background: var(--nc-focus-fill)
@@ -181,11 +186,55 @@ select.nc-input
   position-area: block-end span-inline-end
   position-try-order: normal
   position-try-fallbacks: flip-block
+  margin-block: -1px
   padding: 0
   border: 1px solid var(--nc-line)
   background: var(--nc-bg)
   color: var(--nc-fg)
   font: inherit
+.nc-select
+  position: relative
+  display: block
+  min-width: 0
+.nc-select__trigger
+  display: flex
+  align-items: center
+  justify-content: space-between
+  gap: 12px
+  text-align: left
+  > span
+    overflow: hidden
+    white-space: nowrap
+    text-overflow: ellipsis
+  &::after
+    content: ""
+    flex-shrink: 0
+    width: 10px
+    height: 6px
+    background: var(--nc-accent)
+    clip-path: polygon(0 0, 100% 0, 50% 100%)
+  &[data-placeholder], &:disabled
+    color: var(--nc-placeholder)
+  &:disabled::after
+    background: var(--nc-placeholder)
+.nc-select .nc-suggestions
+  z-index: 2
+  top: calc(100% - 1px)
+  [role="option"]
+    display: flex
+    gap: 8px
+    color: var(--nc-fg)
+    &[data-placeholder], &[aria-disabled="true"]
+      color: var(--nc-placeholder)
+    &[data-active]
+      background: var(--nc-focus-fill)
+      color: var(--nc-accent)
+.nc-select[data-open-above] > .nc-suggestions
+  top: auto
+  bottom: 100%
+.nc-select__check
+  width: 1ch
+  flex-shrink: 0
 .nc-autocomplete
   position: relative
 .nc-suggestions

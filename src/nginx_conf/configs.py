@@ -98,7 +98,7 @@ def find_project_configs(root: Path) -> list[NginxConfig]:
     base_root = root.resolve()
     configs: list[NginxConfig] = []
     for project_dir in sorted(root.iterdir()):
-        if project_dir.is_symlink() or not project_dir.is_dir():
+        if project_dir.name == ".venv" or project_dir.is_symlink() or not project_dir.is_dir():
             continue
         project_configs, _issues = _find_project_configs(project_dir, base_root)
         configs.extend(project_configs)
@@ -129,6 +129,8 @@ def discover_inventory(project_root: Path, enabled_root: Path) -> NginxInventory
     config_by_resolved_path: dict[Path, NginxConfig] = {}
 
     for project_dir in sorted(project_root.iterdir()):
+        if project_dir.name == ".venv":
+            continue
         if project_dir.is_symlink():
             issues.append(
                 InventoryIssue(
@@ -175,7 +177,21 @@ def discover_inventory(project_root: Path, enabled_root: Path) -> NginxInventory
                 )
             )
 
-    _add_duplicate_conflicts(project_records, project_issues_by_name)
+    active_records = [
+        (name, path, [config for config in configs if config.config_path.resolve() in enabled_links_by_config], issues)
+        for name, path, configs, issues in project_records
+    ]
+    _add_duplicate_conflicts(project_records, project_issues_by_name, set(enabled_links_by_config))
+    for name, path, configs, _ in active_records:
+        if len(configs) > 1:
+            project_issues_by_name[name].append(
+                InventoryIssue(
+                    code="multiple_active_configs",
+                    message="Mehrere Configs dieses Projekts sind aktiv. Bitte die enabled-Symlinks bereinigen.",
+                    subject=str(path),
+                    related=tuple(str(config.config_path) for config in configs),
+                )
+            )
 
     projects: list[ProjectInventory] = []
     for project_name, project_path, configs, _project_issues in project_records:
@@ -278,6 +294,7 @@ def _find_project_configs(project_dir: Path, base_root: Path) -> tuple[list[Ngin
 
     for current_root, dirnames, filenames in os.walk(project_dir, followlinks=False):
         current_path = Path(current_root)
+        dirnames[:] = [dirname for dirname in dirnames if dirname != ".venv"]
         skipped_symlink_dirs = [dirname for dirname in dirnames if (current_path / dirname).is_symlink()]
         for dirname in sorted(skipped_symlink_dirs):
             issues.append(
@@ -344,6 +361,7 @@ def _scan_enabled_symlinks(
         )
         return enabled_links_by_config
 
+    admin_config = (enabled_root.parent / "sites-available" / "nginx-conf").resolve()
     for link_path in sorted(enabled_root.iterdir()):
         if not link_path.is_symlink():
             issues.append(
@@ -371,6 +389,9 @@ def _scan_enabled_symlinks(
                     related=(raw_target,),
                 )
             )
+            continue
+
+        if link_path.name == "nginx-conf" and resolved_target == admin_config and resolved_target.is_file():
             continue
 
         if not resolved_target.is_relative_to(base_root):
@@ -403,20 +424,20 @@ def _scan_enabled_symlinks(
 def _add_duplicate_conflicts(
     project_records: list[tuple[str, Path, list[NginxConfig], list[InventoryIssue]]],
     issues_by_project: dict[str, list[InventoryIssue]],
+    active_paths: set[Path],
 ) -> None:
-    domains: dict[str, list[str]] = {}
-    ports: dict[int, list[str]] = {}
+    domains: dict[tuple[Path | None, str], list[str]] = {}
 
-    for project_name, _project_path, configs, _issues in project_records:
+    for _project_name, _project_path, configs, _issues in project_records:
         for config in configs:
+            # Inactive alternatives only conflict within their own file.
+            scope = None if config.config_path.resolve() in active_paths else config.config_path
             for block in config.domain_groups:
                 block_subject = f"{config.config_path}#server[{block.ordinal}]"
                 for server_name in block.server_names:
-                    domains.setdefault(server_name, []).append(block_subject)
-                for port in block.listen_ports:
-                    ports.setdefault(port, []).append(block_subject)
+                    domains.setdefault((scope, server_name), []).append(block_subject)
 
-    for server_name, locations in domains.items():
+    for (_scope, server_name), locations in domains.items():
         if len(locations) < 2:
             continue
         issue = InventoryIssue(
@@ -424,25 +445,6 @@ def _add_duplicate_conflicts(
             message=f"Domain kommt in mehreren server_name-Gruppen vor: {server_name}",
             subject=server_name,
             related=tuple(locations),
-        )
-        _append_issue_to_related_projects(issue, project_records, issues_by_project)
-
-    port_conflicts: dict[tuple[str, ...], list[int]] = {}
-    for port, locations in ports.items():
-        if len(locations) >= 2:
-            port_conflicts.setdefault(tuple(sorted(locations)), []).append(port)
-
-    for locations, shared_ports in port_conflicts.items():
-        label = ", ".join(str(port) for port in sorted(shared_ports))
-        issue = InventoryIssue(
-            code="duplicate_listen_port",
-            message=(
-                f"Listen-Port kommt in mehreren server-Bloecken vor: {label}"
-                if len(shared_ports) == 1
-                else f"Listen-Ports kommen in mehreren Konfigurationen vor: {label}"
-            ),
-            subject=label,
-            related=locations,
         )
         _append_issue_to_related_projects(issue, project_records, issues_by_project)
 

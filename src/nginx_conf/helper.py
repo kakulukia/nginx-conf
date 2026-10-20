@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,7 +12,7 @@ from typing import Any
 from nginx_conf.configs import certificate_server_group, parse_server_blocks
 from nginx_conf.github_clone import GitHubClonePlan, GitHubCloneValidationError, plan_github_clone
 from nginx_conf.store import AppDatabase, default_database_path
-from nginx_conf.system_actions import certbot_issue_command
+from nginx_conf.system_actions import certbot_issue_command, nginx_test_command
 
 PROJECT_ROOT = Path("/opt/www")
 ENABLED_ROOT = Path("/etc/nginx/sites-enabled")
@@ -42,6 +44,7 @@ class ValidatedRequest:
     expected_file: Path
     repo_root: Path
     repo_relative_file: Path
+    project_path: Path
     enabled_root: Path
     payload: dict[str, Any]
 
@@ -82,6 +85,8 @@ def handle_helper_request(
         if subcommand == "commit-config":
             return 0, _commit_config(request)
         if subcommand == "activate-config":
+            if context.db.get_action(request.action_id).parameters.get("switch_config") is True:
+                return _switch_config(request, context)
             return 0, _activate_config(request)
         if subcommand == "deactivate-config":
             return 0, _deactivate_config(request)
@@ -149,7 +154,12 @@ def _validate_request(subcommand: str, payload: dict[str, Any], context: HelperC
         raise HelperRequestError("Config path does not match action_id")
 
     selection = context.db.get_project_selection(project)
-    if selection is None or selection.nginx_config_path != str(expected_file):
+    saved_config = selection.nginx_config_path if selection else None
+    switching = subcommand == "activate-config" and action.parameters.get("switch_config") is True
+    if switching:
+        if "previous_selection" not in action.parameters or saved_config != action.parameters["previous_selection"]:
+            raise HelperRequestError("Saved selection changed since the config switch was requested")
+    elif saved_config != str(expected_file):
         raise HelperRequestError("Expected file is not the saved project Nginx selection")
 
     resolved_project = _validate_project_path(project, context.project_root)
@@ -170,6 +180,7 @@ def _validate_request(subcommand: str, payload: dict[str, Any], context: HelperC
         expected_file=resolved_expected,
         repo_root=repo_root,
         repo_relative_file=resolved_expected.relative_to(repo_root),
+        project_path=resolved_project,
         enabled_root=context.enabled_root,
         payload=payload,
     )
@@ -248,7 +259,7 @@ def _commit_config(request: ValidatedRequest) -> dict[str, Any]:
 
 
 def _activate_config(request: ValidatedRequest) -> dict[str, Any]:
-    link_path = _validate_enabled_link_path(_required_str(request.payload, "link_path"), request)
+    link_path = _project_enabled_link(request)
     if link_path.exists() or link_path.is_symlink():
         _validate_managed_enabled_symlink(link_path, request.expected_file)
     else:
@@ -257,11 +268,81 @@ def _activate_config(request: ValidatedRequest) -> dict[str, Any]:
 
 
 def _deactivate_config(request: ValidatedRequest) -> dict[str, Any]:
-    link_path = _validate_enabled_link_path(_required_str(request.payload, "link_path"), request)
+    link_path = _project_enabled_link(request)
     if link_path.exists() or link_path.is_symlink():
         _validate_managed_enabled_symlink(link_path, request.expected_file)
         link_path.unlink()
     return _success_response(request, changed_file=str(link_path), diff_stat=None)
+
+
+def _project_enabled_link(request: ValidatedRequest) -> Path:
+    requested = _validate_enabled_link_path(_required_str(request.payload, "link_path"), request)
+    enabled = _validate_enabled_root(request.enabled_root)
+    names = {request.project, f"{request.project}.conf"}
+    links = []
+    for entry in enabled.iterdir():
+        belongs_to_project = entry.is_symlink() and entry.resolve().is_relative_to(request.project_path)
+        if entry.name in names or belongs_to_project:
+            if not entry.is_symlink():
+                raise HelperRequestError("Enabled path exists but is not a symlink")
+            if entry.name not in names:
+                raise HelperRequestError("Project config is active under an unmanaged symlink name")
+            links.append(entry)
+    if len(links) > 1:
+        raise HelperRequestError("Multiple enabled symlinks for this project must be resolved before switching")
+    return links[0] if links else requested
+
+
+def _replace_enabled_link(link: Path, target: str | Path) -> None:
+    temporary = link.parent / f".nginx-conf-{uuid.uuid4().hex}"
+    try:
+        temporary.symlink_to(target)
+        os.replace(temporary, link)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _switch_config(request: ValidatedRequest, context: HelperContext) -> tuple[int, dict[str, Any]]:
+    action = context.db.get_action(request.action_id)
+    if "previous_active_config" not in action.parameters:
+        raise HelperRequestError("Missing previous active config")
+    previous = action.parameters["previous_active_config"]
+    if previous is not None:
+        if not isinstance(previous, str):
+            raise HelperRequestError("Invalid previous active config")
+        previous = _validate_existing_config(Path(previous), request.project_path)
+    link = _project_enabled_link(request)
+    rollback = request.payload.get("rollback") is True
+    expected = request.expected_file if rollback else previous
+    if expected is None:
+        if link.exists() or link.is_symlink():
+            raise HelperRequestError("Enabled state changed since the config switch was requested")
+    else:
+        _validate_managed_enabled_symlink(link, expected)
+
+    if rollback:
+        if previous is None:
+            link.unlink()
+        else:
+            _replace_enabled_link(link, previous)
+        return 0, _success_response(request, changed_file=str(link))
+
+    original_target = os.readlink(link) if link.is_symlink() else None
+    _replace_enabled_link(link, request.expected_file)
+    try:
+        command = nginx_test_command()
+        test = subprocess.run(
+            command.argv, capture_output=True, text=True, shell=False, check=False, timeout=command.timeout_seconds
+        )
+        if test.returncode != 0:
+            raise HelperRequestError("nginx -t fehlgeschlagen: " + (test.stderr or test.stdout)[-4000:])
+    except Exception as error:
+        if original_target is None:
+            link.unlink()
+        else:
+            _replace_enabled_link(link, original_target)
+        raise HelperRequestError(f"Config nicht übernommen. Bisheriger Zustand wiederhergestellt. {error}") from error
+    return 0, {**_success_response(request, changed_file=str(link)), "nginx_test": test.stderr or test.stdout}
 
 
 def _clone_project(request: ValidatedCloneRequest) -> dict[str, Any]:

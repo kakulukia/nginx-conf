@@ -602,9 +602,16 @@ class AppDatabase:
         *,
         nginx_config_path: str | Path | None,
         pm2_start_script_path: str | Path | None,
+        action_id: str | None = None,
     ) -> None:
         now = _now()
         with self._connect() as connection:
+            connection.execute("begin immediate")
+            active = connection.execute(
+                "select action_id from actions where status in ('started', 'running') limit 1"
+            ).fetchone()
+            if active is not None and active["action_id"] != action_id:
+                raise ActionLockError("Aktion laeuft bereits. Config-Auswahl kann gerade nicht geaendert werden.")
             connection.execute(
                 """
                 insert into project_selections (

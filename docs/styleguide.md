@@ -104,9 +104,14 @@ per Tastatur erreichbar. Ihr Beispieltext wird nicht gespeichert und löst
 keine Serveraktion aus. Lange Inhalte scrollen innerhalb des Feldes.
 
 Dropdowns verwenden native `select`-Felder mit gestaltbarem Auswahlmenü,
-sofern der Browser `base-select` unterstützt. Sonst bleibt das native Menü.
-Solange das Dropdown geöffnet ist, bleiben Fokusfläche, Innenabstand und
-blaue Unterlinie erhalten, auch wenn der Fokus in der Optionsliste liegt.
+sofern der Browser `base-select` unterstützt. Sonst ergänzt `select.js` ein
+gestaltetes Menü mit Combobox- und Listbox-Semantik. Das ursprüngliche Select
+bleibt für Formularwerte, Pflichtfeldprüfung und Zurücksetzen erhalten.
+Pfeiltasten, Home, End, Texteingabe, Enter, Tab und Escape bedienen die Auswahl.
+Ohne JavaScript bleibt das native Feld nutzbar.
+Solange das Dropdown geöffnet ist, bleiben Fokusfläche und Innenabstand
+erhalten, auch wenn der Fokus in der Optionsliste liegt. Der Menürand
+überlagert die blaue Unterlinie um einen Pixel.
 Die Liste öffnet direkt darunter und weicht nur bei Platzmangel nach oben aus.
 „Bitte auswählen“ erscheint dunkelgrau, solange kein Wert gewählt ist.
 Ausgewählte Werte in aktiven Feldern bleiben weiß. Deaktivierte Dropdowns
@@ -149,8 +154,10 @@ Listen werden als gruppierte Zeilen sowie mit Aufzählungszeichen und
 Nummerierung gezeigt. Logausgabe und breite Projekttabelle demonstrieren
 vertikales und horizontales Scrollen, ohne die ganze Seite zu verbreitern.
 Scrollbereiche sind benannt und über die Tastatur erreichbar.
-Browserfenster und innere Scrollbereiche verwenden dieselbe 8 px schmale,
-eckige Scrollbar mit hellem Schieber auf dunklem Grund.
+Browserfenster und innere Scrollbereiche verwenden helle Schieber auf dunklem
+Grund. WebKit- und Chromium-Browser nutzen 8 px breite, eckige Scrollbalken.
+Firefox nutzt dafür die standardisierten Eigenschaften `scrollbar-color` und
+`scrollbar-width: thin`; die genaue Form und Breite bestimmt dort der Browser.
 
 Aufklappelemente öffnen und schließen mit einer 180 ms langen Höhen- und
 Deckkraftanimation. Der Pfeil dreht sich gleichzeitig um 90 Grad.
@@ -232,6 +239,7 @@ Die ISC-Lizenz ist direkt in `src/nginx_conf/static/favicon.svg` enthalten.
 - `src/nginx_conf/templates/styleguide.html`: Beispiele ohne Serveraktionen.
 - `src/nginx_conf/templates/_otp.html`: wiederverwendbarer TOTP-Baustein.
 - `src/nginx_conf/static/otp.js`: gemeinsame Zifferneingabe und Positionsanzeige.
+- `src/nginx_conf/static/select.js`: gemeinsamer Dropdown-Fallback ohne `base-select`.
 
 Nach Sass-Änderungen mit dem lokal installierten Dart Sass kompilieren:
 
@@ -242,5 +250,5 @@ sass --no-source-map --style=compressed src/nginx_conf/styles/app.sass src/nginx
 
 Quellen und erzeugte CSS-Datei gemeinsam prüfen und versionieren.
 Zur Laufzeit wird kein Sass benötigt. Öffentlich abrufbar sind ausschließlich
-das Favicon, beide CSS-Dateien, die TOTP-JavaScript-Datei und die beiden Schriftdateien. Die Referenzseite
-bleibt geschützt.
+das Favicon, beide CSS-Dateien, die TOTP- und Dropdown-JavaScript-Dateien und
+die beiden Schriftdateien. Die Referenzseite bleibt geschützt.

@@ -16,6 +16,7 @@
       {% block navigation %}{% endblock %}
       <main class="app-main" id="inhalt">{% block content %}{% endblock %}</main>
     </div>
+    <script src="{{ url_for('static', path='select.js') }}" defer></script>
     {% block scripts %}{% endblock %}
   </body>
 </html>
