@@ -41,11 +41,6 @@ from nginx_conf.django_allowed_hosts import (
     check_django_allowed_hosts,
     findings_for_config,
 )
-from nginx_conf.django_deploy import (
-    action_for_operation,
-    django_deploy_statuses_to_dict,
-    inspect_django_deploy,
-)
 from nginx_conf.dns_preflight import check_dns_preflight, dns_preflight_to_dict
 from nginx_conf.git_workflow import (
     GitWorkflowError,
@@ -80,7 +75,6 @@ from nginx_conf.system_actions import (
     SystemActionService,
     certbot_issue_command,
     certbot_renew_dry_run_command,
-    django_manage_command,
     github_clone_helper_command,
     helper_command,
     nginx_reload_command,
@@ -428,9 +422,6 @@ def _projects_page(request: Request, *, title: str, project_name: str | None = N
     ssl_inventory = discover_ssl_inventory(selected_projects, letsencrypt_root=LETSENCRYPT_ROOT)
     renewal_status = inspect_certbot_renewal()
     allowed_hosts_inventory = check_django_allowed_hosts(inventory.projects)
-    django_deploy_statuses = {
-        status.project_name: status for status in inspect_django_deploy(inventory.projects) if status.is_django
-    }
     pm2_status = read_pm2_status(
         project_root=PROJECT_ROOT,
         projects=inventory.projects,
@@ -454,7 +445,6 @@ def _projects_page(request: Request, *, title: str, project_name: str | None = N
         )
         git_status = git_statuses[project.project_name]
         ssl_status = ssl_statuses.get(project.project_name)
-        django_deploy = django_deploy_statuses.get(project.project_name)
         processes = processes_by_project.get(project.project_name, ())
         has_warning = bool(
             project.issues
@@ -466,7 +456,6 @@ def _projects_page(request: Request, *, title: str, project_name: str | None = N
             or (ssl_status and any(domain.state != "valid" for domain in ssl_status.domains))
             or pm2_status.error
             or any(process.warning or process.status != "online" for process in processes)
-            or (django_deploy and any(not action.available for action in django_deploy.actions))
         )
         project_rows.append(
             {
@@ -494,7 +483,6 @@ def _projects_page(request: Request, *, title: str, project_name: str | None = N
             "certbot_actions": _certbot_actions_by_config_block(inventory, ssl_inventory),
             "allowed_hosts_warnings": allowed_hosts_warnings,
             "allowed_hosts_uncheckable_projects": allowed_hosts_inventory.uncheckable_projects,
-            "django_deploy_statuses": django_deploy_statuses,
             "pm2_status": pm2_status,
             "pm2_processes_by_project": processes_by_project,
             "managed_pm2_projects": {process.project_name for process in database.list_managed_pm2_processes()},
@@ -544,7 +532,6 @@ def projects_api() -> dict[str, object]:
     ]
     payload["ssl"] = ssl_inventory_to_dict(discover_ssl_inventory(inventory.projects, letsencrypt_root=LETSENCRYPT_ROOT))
     payload["django_allowed_hosts"] = allowed_hosts_inventory_to_dict(check_django_allowed_hosts(inventory.projects))
-    payload["django_deploy"] = django_deploy_statuses_to_dict(inspect_django_deploy(inventory.projects))
     return payload
 
 
@@ -611,34 +598,6 @@ def pm2_api() -> dict[str, object]:
             runner=get_command_runner(db),
         )
     )
-
-
-@app.post("/api/projects/{project_name}/django/{operation}")
-def django_deploy_action_api(project_name: str, operation: str) -> dict[str, object]:
-    project = find_project_or_404(project_name)
-    status = inspect_django_deploy((project,))[0]
-    action = action_for_operation(status, operation)
-    if action is None:
-        raise HTTPException(status_code=400, detail=f"Unsupported Django deploy operation: {operation}")
-    if not status.is_django:
-        raise HTTPException(status_code=404, detail="Project is not a Django project")
-    if not action.available:
-        raise HTTPException(status_code=400, detail=f"Django deploy action unavailable: {', '.join(action.blockers)}")
-    db = get_database()
-    try:
-        result = get_system_action_service(db).run(
-            django_manage_command(
-                operation,
-                project_root=PROJECT_ROOT,
-                project_path=project.project_path,
-                python_path=status.python_path,
-            )
-        )
-    except ActionLockError as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
-    return _system_action_result_to_dict(result)
 
 
 @app.post("/api/projects/{project_name}/pm2/create")

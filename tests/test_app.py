@@ -241,7 +241,7 @@ def test_project_page_keeps_details_out_of_overview_and_scopes_projects(monkeypa
 
 def test_project_table_uses_active_domains_and_has_no_warning_for_clean_project(monkeypatch, tmp_path) -> None:
     project, enabled, config = configure_temp_project_roots(monkeypatch, tmp_path)
-    (project / "manage.py").unlink()
+    (project / "demo/settings.py").write_text('ALLOWED_HOSTS = ["demo.local", "www.demo.local"]\n')
     (project / "start.sh").write_text("#!/bin/sh\n")
     run_git(project, "init")
     run_git(project, "add", ".")
@@ -398,7 +398,7 @@ def test_clone_project_api_rejects_non_github_or_existing_target(monkeypatch, tm
     assert "already exists" in existing.json()["detail"]
 
 
-def test_project_page_shows_django_deploy_actions_for_django_project(monkeypatch, tmp_path) -> None:
+def test_project_page_has_no_django_deploy_actions(monkeypatch, tmp_path) -> None:
     project, _enabled_root, _config = configure_temp_project_roots(monkeypatch, tmp_path)
     venv = project / ".venv/bin"
     venv.mkdir(parents=True)
@@ -407,57 +407,17 @@ def test_project_page_shows_django_deploy_actions_for_django_project(monkeypatch
     response = client.get("/projects/demo-app")
 
     assert response.status_code == 200
-    assert "Django Deploy" in response.text
-    assert "/api/projects/demo-app/django/migrate" in response.text
-    assert "/api/projects/demo-app/django/collectstatic" in response.text
-    assert "compress nicht verfuegbar" in response.text
-
-
-def test_project_page_hides_django_deploy_actions_for_non_django_project(monkeypatch, tmp_path) -> None:
-    configure_git_project_roots(monkeypatch, tmp_path)
-
-    response = client.get("/projects/demo-app")
-
-    assert response.status_code == 200
     assert "Django Deploy" not in response.text
-    assert "/django/migrate" not in response.text
+    assert "/django/" not in response.text
 
 
-def test_django_deploy_action_api_runs_fixed_manage_command(monkeypatch, tmp_path) -> None:
-    project, _enabled_root, _config = configure_temp_project_roots(monkeypatch, tmp_path)
-    venv = project / ".venv/bin"
-    venv.mkdir(parents=True)
-    python = venv / "python"
-    python.write_text("#!/bin/sh\n", encoding="utf-8")
-    calls = []
-
-    class Service:
-        def run(self, command, *, action_id=None):
-            calls.append(command)
-            return SystemActionResult(
-                action_id="django-action",
-                command=command,
-                result=CommandResult(exit_code=0, stdout="migrated", stderr=""),
-            )
-
-    monkeypatch.setattr(main, "get_system_action_service", lambda db: Service())
-
-    response = client.post("/api/projects/demo-app/django/migrate")
-
-    assert response.status_code == 200
-    assert calls[0].argv == (str(python), str(project / "manage.py"), "migrate")
-    payload = response.json()
-    assert payload["action_type"] == "django-migrate"
-    assert payload["ok"] is True
-
-
-def test_django_deploy_action_api_rejects_missing_environment(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize("operation", ["migrate", "collectstatic", "compress"])
+def test_django_deploy_action_api_is_removed(monkeypatch, tmp_path, operation) -> None:
     configure_temp_project_roots(monkeypatch, tmp_path)
 
-    response = client.post("/api/projects/demo-app/django/migrate")
+    response = client.post(f"/api/projects/demo-app/django/{operation}")
 
-    assert response.status_code == 400
-    assert "missing_python_environment" in response.json()["detail"]
+    assert response.status_code == 404
 
 
 def test_unconfigured_app_has_only_login_and_no_web_setup(monkeypatch, tmp_path) -> None:
@@ -498,6 +458,7 @@ def test_projects_api_returns_structured_inventory(monkeypatch, tmp_path) -> Non
 
     assert response.status_code == 200
     payload = response.json()
+    assert "django_deploy" not in payload
     project = payload["projects"][0]
     config = project["configs"][0]
     assert project["project_name"] == "demo-app"

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ipaddress
 import json
-import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,11 +20,6 @@ CERTBOT_EMAIL = "andy@freilandkiwis.de"
 DEFAULT_TIMEOUT_SECONDS = 120
 LONG_RUNNING_TIMEOUT_SECONDS = 1800
 PM2_OPERATIONS_WITH_NAME = {"delete", "reload", "restart", "start", "stop"}
-DJANGO_MANAGE_OPERATIONS = {
-    "collectstatic": ("collectstatic", "--noinput"),
-    "compress": ("compress",),
-    "migrate": ("migrate",),
-}
 
 
 class PathValidationError(ValueError):
@@ -316,36 +310,6 @@ def pm2_start_command(
     )
 
 
-def django_manage_command(
-    operation: str,
-    *,
-    project_root: Path,
-    project_path: Path,
-    python_path: Path | None = None,
-) -> CommandSpec:
-    if operation not in DJANGO_MANAGE_OPERATIONS:
-        raise CommandValidationError(f"Unsupported Django deploy operation: {operation}")
-
-    resolved_project = validate_existing_path_under_root(project_path, project_root, expected_file=False)
-    manage_py = validate_existing_path_under_root(resolved_project / "manage.py", resolved_project, expected_file=True)
-    python = _validated_project_python(resolved_project, python_path)
-    manage_args = DJANGO_MANAGE_OPERATIONS[operation]
-    return CommandSpec(
-        action_type=f"django-{operation}",
-        subcommand=f"django-{operation}",
-        target=resolved_project.name,
-        argv=(str(python), str(manage_py), *manage_args),
-        project=resolved_project.name,
-        parameters={
-            "operation": operation,
-            "project_path": str(resolved_project),
-            "manage_py": str(manage_py),
-            "python": str(python),
-        },
-        timeout_seconds=LONG_RUNNING_TIMEOUT_SECONDS,
-    )
-
-
 def helper_command(
     *,
     subcommand: str,
@@ -459,29 +423,3 @@ def _validate_certbot_domains(domains: tuple[str, ...]) -> None:
 def _validate_pm2_name(name: str) -> None:
     if not name or any(char.isspace() for char in name) or "/" in name:
         raise CommandValidationError(f"Invalid PM2 process name: {name}")
-
-
-def _validated_project_python(project_path: Path, python_path: Path | None) -> Path:
-    candidates = (
-        (python_path,)
-        if python_path is not None
-        else (
-            project_path / ".venv/bin/python",
-            project_path / ".venv/bin/python3",
-            project_path / "venv/bin/python",
-            project_path / "venv/bin/python3",
-        )
-    )
-    for candidate in candidates:
-        normalized = _normalize_project_child_path(candidate, project_path)
-        if normalized.exists() and normalized.is_file():
-            return normalized
-    raise CommandValidationError("Django Python environment not found")
-
-
-def _normalize_project_child_path(path: Path, project_path: Path) -> Path:
-    resolved_project = project_path.resolve(strict=True)
-    absolute_path = Path(os.path.abspath(path))
-    if not absolute_path.is_relative_to(resolved_project):
-        raise PathValidationError(f"Pfad liegt ausserhalb der erlaubten Projektwurzel: {path}")
-    return absolute_path

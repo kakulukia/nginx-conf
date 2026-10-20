@@ -117,24 +117,6 @@
       </ul>
     {% endif %}
   {% endif %}
-  {% set django_deploy = django_deploy_statuses.get(project.project_name) if django_deploy_statuses is defined else none %}
-  {% if django_deploy %}
-    <div class="nc-text nc-text--small app-meta">Django Deploy</div>
-    <div class="app-actions">
-      {% for action in django_deploy.actions %}
-        <form action="/api/projects/{{ project.project_name }}/django/{{ action.operation }}" method="post">
-          <button class="nc-button" type="submit"{% if active_action or not action.available %} disabled{% endif %}>
-            {{ action.operation }}
-          </button>
-        </form>
-      {% endfor %}
-    </div>
-    {% for action in django_deploy.actions %}
-      {% if not action.available %}
-        <div class="nc-text--small app-meta nc-status--warning">{{ action.operation }} nicht verfuegbar: {{ action.blockers | join(", ") }}</div>
-      {% endif %}
-    {% endfor %}
-  {% endif %}
   {% if git_statuses is defined and git_statuses.get(project.project_name) %}
     {% set git_status = git_statuses.get(project.project_name) %}
     <p class="nc-text nc-text--small app-meta">

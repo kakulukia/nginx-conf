@@ -14,7 +14,6 @@ from nginx_conf.system_actions import (
     SystemActionService,
     certbot_issue_command,
     certbot_renew_dry_run_command,
-    django_manage_command,
     github_clone_helper_command,
     helper_command,
     nginx_reload_command,
@@ -125,41 +124,6 @@ def test_pm2_commands_are_allowlisted_and_validate_paths(tmp_path: Path) -> None
         pm2_lifecycle_command("save", "demo-app")
     with pytest.raises(CommandValidationError):
         pm2_logs_command("bad/name")
-
-
-def test_django_manage_commands_are_allowlisted_and_validate_paths(tmp_path: Path) -> None:
-    root = tmp_path / "opt/www"
-    project = root / "demo-app"
-    venv = project / ".venv/bin"
-    venv.mkdir(parents=True)
-    manage_py = project / "manage.py"
-    python = venv / "python"
-    manage_py.write_text("#!/usr/bin/env python\n", encoding="utf-8")
-    python.write_text("#!/bin/sh\n", encoding="utf-8")
-
-    migrate = django_manage_command("migrate", project_root=root, project_path=project)
-    collectstatic = django_manage_command("collectstatic", project_root=root, project_path=project)
-    compress = django_manage_command("compress", project_root=root, project_path=project)
-
-    assert migrate.argv == (str(python), str(manage_py), "migrate")
-    assert collectstatic.argv == (str(python), str(manage_py), "collectstatic", "--noinput")
-    assert compress.argv == (str(python), str(manage_py), "compress")
-    assert migrate.timeout_seconds == 1800
-
-    with pytest.raises(CommandValidationError):
-        django_manage_command("shell", project_root=root, project_path=project)
-    with pytest.raises(PathValidationError):
-        django_manage_command("migrate", project_root=root, project_path=tmp_path)
-
-
-def test_django_manage_command_reports_missing_python_environment(tmp_path: Path) -> None:
-    root = tmp_path / "opt/www"
-    project = root / "demo-app"
-    project.mkdir(parents=True)
-    (project / "manage.py").write_text("#!/usr/bin/env python\n", encoding="utf-8")
-
-    with pytest.raises(CommandValidationError, match="Python environment"):
-        django_manage_command("migrate", project_root=root, project_path=project)
 
 
 def test_helper_command_uses_fixed_subcommand_and_json_stdin_only() -> None:

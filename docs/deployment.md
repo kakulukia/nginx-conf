@@ -148,7 +148,7 @@ und erlaubte Helper-Subcommands. Variable Daten gehen als JSON ueber stdin.
 `certbot-issue` validiert die laufende `action_id`, Projektauswahl, Config-Pfade
 und exakt eine aktive `server_name`-Gruppe, bevor es das feste Certbot-Template
 ausfuehrt. Keine Shell oder sudoers-Wildcards freigeben.
-PM2 und Django laufen ohne sudo als App-Nutzer.
+PM2 läuft ohne sudo als App-Nutzer.
 
 ## Netzwerk und HTTPS
 
@@ -362,7 +362,8 @@ und darf so nicht aktiviert werden. Zuerst eine gueltige HTTP-Config fuer
 angleichen, dann SSL einrichten. Als PM2-Startscript explizit
 `settings/deployment/project.sh` auswaehlen; es gibt auch `worker.sh`.
 
-Django-Migrationen, `collectstatic` und `compress` laufen als App-Nutzer.
+Django-Migrationen, `collectstatic` und `compress` gehören in die
+projektspezifischen Fabric-Abläufe.
 Sass muss im PATH liegen. Aufgaben-Worker und Cronjobs werden separat nach
 der Projektanleitung eingerichtet. Der MVP verwaltet nur den ausgewaehlten
 Webprozess; manuell gestartete Worker bleiben als unverwaltet sichtbar.

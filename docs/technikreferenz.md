@@ -88,8 +88,8 @@ bereits gespeicherte Auswahl verwenden.
 - Die Startseite zeigt eine Projekttabelle mit Domains der aktiven Configs
   beziehungsweise der ausgewählten Config, Nginx-Aktivstatus und einem roten
   Warndreieck bei Projektbefunden. Projektname und Warndreieck führen nach
-  `/projects/{project_name}`. Configs, Auswahl, Git, SSL, Django und PM2 stehen
-  auf dieser Projektseite. Übergreifende Serverhinweise bleiben auf der
+  `/projects/{project_name}`. Configs, Auswahl, Git, SSL, Django-Hostprüfung und
+  PM2 stehen auf dieser Projektseite. Übergreifende Serverhinweise bleiben auf der
   Startseite eingeklappt erreichbar. `/configs` zeigt ebenfalls die Übersicht.
 - Die eigene Verwaltungsseite ist kein verwaltetes Projekt. Der intakte
   Symlink `sites-enabled/nginx-conf` auf `sites-available/nginx-conf` erzeugt
@@ -738,29 +738,14 @@ Webapp-Prozessprovider. systemd fuer Webapps bleibt ein spaeterer separater
 Provider hinter derselben Provider-Schnittstelle; Nginx selbst bleibt davon
 unabhaengig immer systemd-Dienst.
 
-## Django-Betriebsaktionen
+## Django-Deployment
 
-Nach dem MVP sollen fuer Django-Projekte typische Deploy-Schritte als eigene
-allowlisted Aktionen bewertet werden:
-
-- `manage.py migrate`
-- `manage.py collectstatic --noinput`
-- `manage.py compress`
-
-Diese Aktionen sind keine freie `manage.py`-Konsole. Sie brauchen denselben
-globalen Aktions-Lock, Audit-/Ergebnisstatus und Projektpfadschutz wie Nginx-,
-Certbot- und PM2-Aktionen.
-Die App fuehrt sie ueber die Projekt-Python-Binary aus
-`.venv/bin/python`, `.venv/bin/python3`, `venv/bin/python` oder
-`venv/bin/python3` und die feste `manage.py` im Projektordner aus. Projektpfad
-und `manage.py` muessen unter `/opt/www` validiert sein. Freie
-`manage.py`-Subcommands, freie Zusatzargumente, Shell-Ausfuehrung und sudo sind
-nicht vorgesehen.
-`collectstatic` nutzt immer `--noinput`. `compress` wird nur angeboten, wenn in
-statisch lesbaren Dependency-Dateien ein `django-compressor`-Hinweis steht;
-andernfalls bleibt die Aktion deaktiviert. Fehlt `manage.py` oder die
-Projekt-Python-Umgebung, zeigt die UI die Django-Aktionen nicht bzw. deaktiviert
-sie mit klarem Blocker.
+`manage.py migrate`, `manage.py collectstatic --noinput` und `manage.py compress`
+gehören in die Fabric-Abläufe des jeweiligen Projekts. Die Verwaltungs-App
+bietet dafür keine eigenen Buttons oder API-Aktionen an und bewertet die
+Verfügbarkeit dieser Deploy-Schritte nicht als Projektwarnung.
+Die statische Prüfung von Django `ALLOWED_HOSTS` gegen die Nginx-Domains
+gehört weiterhin zur Config-Verwaltung.
 
 ## Auth und Netzwerkbegrenzung
 
