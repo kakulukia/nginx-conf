@@ -6,7 +6,7 @@ from pathlib import Path
 
 from nginx_conf.configs import NginxConfig, ProjectInventory
 
-IGNORED_DIRS = {".git", ".mypy_cache", ".ruff_cache", ".tox", ".venv", "__pycache__", "node_modules", "venv"}
+PROC_ROOT = Path("/proc")
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +21,7 @@ class AllowedHostsFinding:
 @dataclass(frozen=True, slots=True)
 class AllowedHostsInventory:
     findings: tuple[AllowedHostsFinding, ...]
+    uncheckable_projects: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -28,15 +29,24 @@ class AllowedHostsInventory:
 
 
 def check_django_allowed_hosts(projects: tuple[ProjectInventory, ...]) -> AllowedHostsInventory:
-    findings = [
-        finding for project in projects if is_django_project(project.project_path) for finding in _check_project(project)
-    ]
-    return AllowedHostsInventory(findings=tuple(findings))
+    findings = []
+    uncheckable = []
+    for project in projects:
+        if not is_django_project(project.project_path):
+            continue
+        settings = _read_allowed_hosts(project.project_path)
+        if settings is None:
+            uncheckable.append(project.project_name)
+        else:
+            for config in project.configs:
+                findings.extend(_find_missing_hosts(project, config, settings))
+    return AllowedHostsInventory(findings=tuple(findings), uncheckable_projects=tuple(uncheckable))
 
 
 def allowed_hosts_inventory_to_dict(inventory: AllowedHostsInventory) -> dict[str, object]:
     return {
         "ok": inventory.ok,
+        "uncheckable_projects": list(inventory.uncheckable_projects),
         "findings": [
             {
                 "project_name": finding.project_name,
@@ -85,13 +95,6 @@ def findings_for_config(
     return tuple(findings)
 
 
-def _check_project(project: ProjectInventory) -> tuple[AllowedHostsFinding, ...]:
-    settings = _read_allowed_hosts(project.project_path)
-    if settings is None:
-        return ()
-    return tuple(finding for config in project.configs for finding in _find_missing_hosts(project, config, settings))
-
-
 @dataclass(frozen=True, slots=True)
 class _AllowedHostsSettings:
     path: Path
@@ -121,41 +124,126 @@ def _find_missing_hosts(
 
 
 def _read_allowed_hosts(project_path: Path) -> _AllowedHostsSettings | None:
-    for python_file in _iter_python_files(project_path):
-        try:
-            content = python_file.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        if "ALLOWED_HOSTS" not in content:
-            continue
-        hosts = _parse_allowed_hosts(content)
-        if hosts is not None:
-            return _AllowedHostsSettings(path=python_file, hosts=hosts)
-    return None
-
-
-def _parse_allowed_hosts(content: str) -> tuple[str, ...] | None:
     try:
-        module = ast.parse(content)
-    except SyntaxError:
+        module_name = _running_settings_module(project_path)
+        return _module_allowed_hosts(project_path.resolve(), module_name, set()) if module_name else None
+    except OSError, RuntimeError:
         return None
 
-    last_value: ast.AST | None = None
+
+def _running_settings_module(project_path: Path) -> str | None:
+    try:
+        processes = list(PROC_ROOT.iterdir())
+    except OSError:
+        return None
+    modules = set()
+    for process in processes:
+        if not process.name.isdecimal():
+            continue
+        try:
+            cwd = (process / "cwd").resolve(strict=True)
+        except OSError:
+            continue
+        if not cwd.is_relative_to(project_path.resolve()):
+            continue
+        try:
+            entries = (process / "environ").read_bytes().split(b"\0")
+            for entry in entries:
+                if entry.startswith(b"DJANGO_SETTINGS_MODULE="):
+                    modules.add(entry.split(b"=", 1)[1].decode("utf-8"))
+        except FileNotFoundError, ProcessLookupError:
+            continue
+        except OSError, UnicodeError:
+            return None
+    return next(iter(modules)) if len(modules) == 1 else None
+
+
+def _module_allowed_hosts(
+    project_path: Path, module_name: str, seen: set[str], *, exports_only: bool = False
+) -> _AllowedHostsSettings | None:
+    if module_name in seen or not all(part.isidentifier() for part in module_name.split(".")):
+        return None
+    seen = seen | {module_name}
+    module_path = project_path.joinpath(*module_name.split("."))
+    candidates = (module_path / "__init__.py", module_path.with_suffix(".py"))
+    python_file = next((path for path in candidates if path.is_file()), None)
+    if python_file is None or not python_file.resolve().is_relative_to(project_path):
+        return None
+    try:
+        module = ast.parse(python_file.read_text(encoding="utf-8"))
+    except OSError, UnicodeError, SyntaxError:
+        return None
+    if exports_only and any(isinstance(node, ast.Name) and node.id == "__all__" for node in ast.walk(module)):
+        return None
+    hosts = _parse_allowed_hosts(module, project_path, module_name, python_file.name == "__init__.py", seen)
+    return _AllowedHostsSettings(path=python_file, hosts=hosts) if hosts is not None else None
+
+
+def _parse_allowed_hosts(
+    module: ast.Module, project_path: Path, module_name: str, package: bool, seen: set[str]
+) -> tuple[str, ...] | None:
+    hosts = None
     for statement in module.body:
         if isinstance(statement, ast.Assign):
             if any(isinstance(target, ast.Name) and target.id == "ALLOWED_HOSTS" for target in statement.targets):
-                last_value = statement.value
+                hosts = _literal_string_sequence(statement.value, hosts)
+                continue
         elif isinstance(statement, ast.AnnAssign):
             if isinstance(statement.target, ast.Name) and statement.target.id == "ALLOWED_HOSTS":
-                last_value = statement.value
+                hosts = _literal_string_sequence(statement.value, hosts)
+                continue
+        elif isinstance(statement, ast.AugAssign):
+            if isinstance(statement.target, ast.Name) and statement.target.id == "ALLOWED_HOSTS":
+                value = _literal_string_sequence(statement.value)
+                hosts = (
+                    (*hosts, *value)
+                    if hosts is not None and value is not None and isinstance(statement.op, ast.Add)
+                    else None
+                )
+                continue
+        elif isinstance(statement, ast.ImportFrom):
+            imports_hosts = any(
+                alias.name == "*" or (alias.asname or alias.name) == "ALLOWED_HOSTS" for alias in statement.names
+            )
+            if imports_hosts:
+                if any(
+                    (alias.asname or alias.name) == "ALLOWED_HOSTS" and alias.name != "ALLOWED_HOSTS"
+                    for alias in statement.names
+                ):
+                    hosts = None
+                    continue
+                parts = module_name.split(".") if package else module_name.split(".")[:-1]
+                base = parts[: len(parts) - statement.level + 1] if statement.level else []
+                imported_name = ".".join([*base, *(statement.module or "").split(".")]).strip(".")
+                inherited = (
+                    _module_allowed_hosts(
+                        project_path,
+                        imported_name,
+                        seen,
+                        exports_only=any(alias.name == "*" for alias in statement.names),
+                    )
+                    if statement.level <= len(parts)
+                    else None
+                )
+                hosts = inherited.hosts if inherited else None
+                continue
+        elif isinstance(statement, ast.Import):
+            if any((alias.asname or alias.name.split(".")[0]) == "ALLOWED_HOSTS" for alias in statement.names):
+                hosts = None
+        if any(
+            isinstance(node, ast.Name)
+            and node.id in {"ALLOWED_HOSTS", "exec", "eval", "globals", "locals"}
+            or isinstance(node, ast.Attribute)
+            and node.attr == "ALLOWED_HOSTS"
+            for node in ast.walk(statement)
+        ):
+            hosts = None
+    return tuple(hosts) if hosts is not None else None
 
-    if last_value is None:
-        return None
-    parsed = _literal_string_sequence(last_value)
-    return tuple(parsed) if parsed is not None else None
 
-
-def _literal_string_sequence(node: ast.AST | None) -> tuple[str, ...] | None:
+def _literal_string_sequence(node: ast.AST | None, hosts: tuple[str, ...] | None = None) -> tuple[str, ...] | None:
+    if isinstance(node, ast.Name) and node.id == "ALLOWED_HOSTS":
+        return hosts
     if isinstance(node, ast.List | ast.Tuple | ast.Set):
         values: list[str] = []
         for item in node.elts:
@@ -164,8 +252,8 @@ def _literal_string_sequence(node: ast.AST | None) -> tuple[str, ...] | None:
             values.append(item.value)
         return tuple(values)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        left = _literal_string_sequence(node.left)
-        right = _literal_string_sequence(node.right)
+        left = _literal_string_sequence(node.left, hosts)
+        right = _literal_string_sequence(node.right, hosts)
         if left is not None and right is not None:
             return (*left, *right)
     return None
@@ -191,10 +279,3 @@ def _iter_dependency_files(project_path: Path):
         candidate = project_path / name
         if candidate.is_file():
             yield candidate
-
-
-def _iter_python_files(project_path: Path):
-    for path in sorted(project_path.rglob("*.py")):
-        if any(part in IGNORED_DIRS for part in path.relative_to(project_path).parts):
-            continue
-        yield path

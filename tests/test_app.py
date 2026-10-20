@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from nginx_conf import django_allowed_hosts as hosts_module
 from nginx_conf import logs as logs_module
 from nginx_conf import main
 from nginx_conf.auth import PASSWORD_HASHER, SESSION_COOKIE_NAME, configure_password
@@ -81,6 +82,11 @@ def configure_temp_project_roots(monkeypatch, tmp_path: Path) -> tuple[Path, Pat
     config.write_text("server { listen 80; server_name demo.local www.demo.local; }\n", encoding="utf-8")
     (project / "manage.py").write_text("#!/usr/bin/env python\n", encoding="utf-8")
     (settings_dir / "settings.py").write_text('ALLOWED_HOSTS = ["demo.local"]\n', encoding="utf-8")
+    process = tmp_path / "proc/100"
+    process.mkdir(parents=True)
+    (process / "cwd").symlink_to(project, target_is_directory=True)
+    (process / "environ").write_bytes(b"DJANGO_SETTINGS_MODULE=demo.settings\0")
+    monkeypatch.setattr(hosts_module, "PROC_ROOT", tmp_path / "proc")
 
     monkeypatch.setattr(main, "PROJECT_ROOT", project_root)
     monkeypatch.setattr(main, "SITES_ENABLED_ROOT", enabled_root)
@@ -763,6 +769,24 @@ def test_nginx_reload_blocks_missing_django_allowed_hosts_for_enabled_config(mon
     assert response.status_code == 400
     assert "Django ALLOWED_HOSTS fehlt" in response.json()["detail"]
     assert "www.demo.local" in response.json()["detail"]
+
+
+def test_uncheckable_settings_are_visible_and_do_not_block_commit_or_reload(monkeypatch, tmp_path):
+    project, enabled, config = configure_temp_project_roots(monkeypatch, tmp_path)
+    (enabled / "demo-app.conf").symlink_to(config)
+    (project / "demo/settings.py").write_text('ALLOWED_HOSTS = env.list("ALLOWED_HOSTS")')
+
+    page = client.get("/projects/demo-app")
+
+    assert page.status_code == 200
+    assert "Django ALLOWED_HOSTS nicht prüfbar" in page.text
+    assert "Django ALLOWED_HOSTS fehlt" not in page.text
+    inventory = main.load_inventory()
+    current_project, choice = main.find_choice_or_404("demo-app", main.get_database())
+    assert main._django_allowed_hosts_findings_for_choice(current_project, choice) == ()
+    assert main._django_allowed_hosts_reload_blockers(inventory) == ()
+    payload = client.get("/api/projects").json()["django_allowed_hosts"]
+    assert payload["ok"] and payload["uncheckable_projects"] == ["demo-app"]
 
 
 def test_dns_preflight_api_uses_service(monkeypatch, tmp_path) -> None:

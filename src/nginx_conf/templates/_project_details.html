@@ -35,6 +35,11 @@
       {% for config in project.configs %}
         {% if choice and config.config_path == choice.selected_nginx_config %}
         <li class="app-config">
+          {% if project.project_name in (allowed_hosts_uncheckable_projects | default(())) %}
+            <div class="nc-text nc-text--small app-meta">
+              Django ALLOWED_HOSTS nicht prüfbar: Laufende Settings oder Host-Liste nicht eindeutig lesbar.
+            </div>
+          {% endif %}
           {% for block in config.domain_groups %}
             <div class="nc-text nc-text--small app-meta">
               Domains:

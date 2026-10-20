@@ -22,8 +22,8 @@ alle wichtigen Betriebsinformationen sichtbar sein:
 - SSL-Zertifikatsstatus pro Domain
 - Ablaufdatum und relative Ablaufnaehe, z.B. "in zwei Monaten"
 - laufende App-Prozesse und ihr Status
-- bei Django-Projekten: fehlende statisch lesbare `ALLOWED_HOSTS` nur als
-  Warnung an der betroffenen Domain, nicht als eigene Dauerspalte
+- bei Django-Projekten: fehlende statisch lesbare `ALLOWED_HOSTS` der verwendeten
+  Settings als Warnung an der betroffenen Domain; unklare Settings als „nicht prüfbar“
 - passende sichere Aktionen wie Zertifikat ausstellen, Config aktivieren oder
   Prozess neu starten
 
@@ -338,15 +338,23 @@ wenn `nginx -t` fehlerfrei ist; kaputte Nginx-Configs werden aus der Admin-App
 nicht als WIP committet. Reload ist nur nach fehlerfreiem Test und erfolgreichem
 Commit erlaubt.
 Wenn das Projekt als Django-Projekt erkannt wurde und die Domains der
-geanderten Nginx-Config in statisch lesbaren Django-Settings nicht vollstaendig
+geanderten Nginx-Config in den verwendeten, statisch lesbaren Django-Settings nicht vollstaendig
 in `ALLOWED_HOSTS` enthalten sind, zeigt die Projektseite nur an der betroffenen
 Domain bzw. `server_name`-Gruppe eine Warnung. Es gibt dafuer keine eigene
 dauerhaft sichtbare Dashboard-Spalte. Nach einer App-gemachten
 Nginx-Domainaenderung blockiert ein fehlender `ALLOWED_HOSTS`-Eintrag
-ausserdem Commit und Reload, bis der Check sauber ist. Dynamische oder nicht
-eindeutig statisch lesbare `ALLOWED_HOSTS`-Definitionen werden im MVP ignoriert
-und blockieren nicht. Es werden keine `.env`-Settings ausgewertet und keine
-fremden Django-Settings importiert oder ausgefuehrt.
+ausserdem Commit und Reload, bis der Check sauber ist. Die Zuordnung verwendet
+`DJANGO_SETTINGS_MODULE` aus den unter Linux lesbaren Prozessumgebungen mit
+Arbeitsverzeichnis innerhalb des Projekts. Es muss genau ein Modul feststehen.
+Die Prüfung liest nur dieses Modul und dessen statisch nachvollziehbare,
+projektinterne Settings-Importe. Literale Listen, Vererbung und Verkettung
+werden berücksichtigt; die erste beliebige Python-Datei ist keine Quelle mehr.
+Ohne laufenden, lesbaren Prozess oder bei widersprüchlichen Settings,
+dynamischen Host-Listen, Importzyklen und Pfaden außerhalb des Projekts erscheint
+„Django ALLOWED_HOSTS nicht prüfbar“. Dieser Zustand blockiert weder Commit noch
+Reload. Es werden keine Prozess-Secrets gespeichert oder ausgegeben, keine
+`.env`-Settings ausgewertet und keine fremden Django-Settings importiert oder
+ausgefuehrt. Auf Systemen ohne `/proc` bleibt die Prüfung ebenfalls „nicht prüfbar“.
 Wenn ein Speichern eine fehlerhafte Config erzeugt, bleibt die Datei gespeichert
 und die Textarea bleibt editierbar, damit direkt korrigiert und erneut
 gespeichert/getestet werden kann. Zusaetzlich soll eine gezielte

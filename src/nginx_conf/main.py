@@ -493,6 +493,7 @@ def _projects_page(request: Request, *, title: str, project_name: str | None = N
             "last_certbot_renew_dry_run": database.get_last_action_result_by_type("certbot-renew-dry-run"),
             "certbot_actions": _certbot_actions_by_config_block(inventory, ssl_inventory),
             "allowed_hosts_warnings": allowed_hosts_warnings,
+            "allowed_hosts_uncheckable_projects": allowed_hosts_inventory.uncheckable_projects,
             "django_deploy_statuses": django_deploy_statuses,
             "pm2_status": pm2_status,
             "pm2_processes_by_project": processes_by_project,
