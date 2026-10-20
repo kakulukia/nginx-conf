@@ -2,39 +2,39 @@
   <h2 class="nc-heading">Konfigurationen</h2>
   {% set choice = project_choices.get(project.project_name) if project_choices is defined else none %}
   {% if project.configs %}
+    <div class="app-config-choice">
     <form class="app-inline-form" action="/api/projects/{{ project.project_name }}/config-selection" method="post" data-app-action data-error-target="config-selection-error">
       <label class="app-field" for="project-nginx-config">
-        <span class="nc-label">Nginx-Config</span>
+        <span class="nc-label">aktive Config</span>
         <select class="nc-input" id="project-nginx-config" name="nginx_config_path" autocomplete="off" required{% if active_action %} disabled{% endif %}>
           <option value=""{% if not choice or not choice.selected_nginx_config %} selected{% endif %} disabled>Bitte auswählen</option>
           {% for config in project.configs %}
-            <option value="{{ config.config_path }}"{% if choice and config.config_path == choice.selected_nginx_config %} selected{% endif %}>{{ config.config_path.relative_to(project.project_path) }}{% if config.enabled %} (aktiv){% endif %}</option>
+            <option value="{{ config.config_path }}"{% if choice and config.config_path == choice.selected_nginx_config %} selected{% endif %}>{{ config.config_path.relative_to(project.project_path) }}</option>
           {% endfor %}
         </select>
       </label>
       <button class="nc-button" type="submit"{% if active_action %} disabled{% endif %}>Übernehmen</button>
     </form>
-    <p class="nc-text nc-text--small app-meta">Pro Projekt kann eine Config aktiv sein. Übernehmen prüft und aktiviert die Auswahl. Nginx danach über das Menü neu laden.</p>
+    {% for config in project.configs %}
+      {% if choice and config.config_path == choice.selected_nginx_config %}
+        <a class="nc-button nc-button--quiet nc-button--icon" href="/configs/{{ config.project_name }}/{{ config.config_path.name }}" aria-label="Config öffnen" title="Config öffnen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><path d="M14 3H5v18h14V8l-5-5Zm0 0v5h5M10 12l-3 3 3 3m4-6 3 3-3 3"/></svg>
+        </a>
+        {% if config.enabled %}
+        <form action="/api/projects/{{ config.project_name }}/configs/{{ config.config_path.name }}/deactivate" method="post" data-app-action data-error-target="config-selection-error">
+          <button class="nc-button nc-button--danger nc-button--icon" type="submit" aria-label="Config deaktivieren" title="Aktive Config deaktivieren"{% if active_action %} disabled{% endif %}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10"/></svg>
+          </button>
+        </form>
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+    </div>
     <p class="nc-text nc-status--error" id="config-selection-error" role="alert" hidden></p>
     <ul class="app-config-list">
       {% for config in project.configs %}
         {% if choice and config.config_path == choice.selected_nginx_config %}
         <li class="app-config">
-          <div class="app-config__header">
-          <a href="/configs/{{ config.project_name }}/{{ config.config_path.name }}">
-            {{ config.config_path.name }}
-          </a>
-          {% if config.enabled %}
-            <span class="nc-status nc-status--success">aktiv</span>
-          {% else %}
-            <span class="nc-status">nicht aktiv</span>
-          {% endif %}
-          {% if config.enabled %}
-            <form action="/api/projects/{{ config.project_name }}/configs/{{ config.config_path.name }}/deactivate" method="post" data-app-action data-error-target="config-selection-error">
-              <button class="nc-button nc-button--danger" type="submit"{% if active_action %} disabled{% endif %}>Deaktivieren</button>
-            </form>
-          {% endif %}
-          </div>
           {% for block in config.domain_groups %}
             <div class="nc-text nc-text--small app-meta">
               Domains:

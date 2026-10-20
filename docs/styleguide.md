@@ -117,6 +117,7 @@ Die Liste öffnet direkt darunter und weicht nur bei Platzmangel nach oben aus.
 Ausgewählte Werte in aktiven Feldern bleiben weiß. Deaktivierte Dropdowns
 verwenden dasselbe Dunkelgrau für Schrift und Ausklapppfeil.
 Das Autocomplete filtert lokale Projektvorschläge und erlaubt freie Eingaben.
+Seine Vorschlagsliste überlagert die blaue Unterlinie ebenfalls um einen Pixel.
 Der erste passende Vorschlag ist beim Öffnen und nach jeder Eingabe markiert.
 Enter übernimmt ihn direkt, auch bei mehreren Treffern. Mit Pfeiltasten und
 Maus lassen sich andere Vorschläge wählen. Escape und Verlassen des Feldes

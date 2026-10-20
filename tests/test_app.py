@@ -215,7 +215,6 @@ def test_project_page_keeps_details_out_of_overview_and_scopes_projects(monkeypa
     assert "Django ALLOWED_HOSTS fehlt" not in overview.text
     assert "/configs/demo-app/app.nginx" not in overview.text
     assert details.status_code == 200
-    assert "/configs/demo-app/app.nginx" in details.text
     assert "Nginx-Auswahl" in details.text
     assert '<a href="/" aria-current="page">Projekte</a>' not in details.text
     assert details.text.count("Django ALLOWED_HOSTS fehlt") == 1
@@ -1802,9 +1801,10 @@ def test_project_detail_has_one_config_dropdown_and_selected_details(monkeypatch
     assert 'name="nginx_config_path" autocomplete="off"' in response.text
     assert f'<option value="{config}" selected>' in response.text
     assert f'<option value="{other}">' in response.text
+    assert 'href="/configs/demo-app/app.nginx"' in response.text
     assert "/other.nginx/activate" not in response.text
     assert "unused.example.com" not in response.text
-    assert "Deaktivieren" in response.text
+    assert '/configs/app.nginx/deactivate"' in response.text
     assert '<a href="/" aria-current="page">Projekte</a>' not in response.text
 
 

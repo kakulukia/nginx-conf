@@ -307,10 +307,11 @@
         const error = document.getElementById(form.dataset.errorTarget);
         const submit = form.querySelector('[type="submit"]');
         const label = submit.textContent;
+        const icon = submit.querySelector('svg');
         error.hidden = true;
         form.setAttribute('aria-busy', 'true');
         submit.disabled = true;
-        submit.textContent = 'Wird ausgeführt…';
+        if (!icon) submit.textContent = 'Wird ausgeführt…';
         if (form === cloneForm) cancelClone.disabled = true;
         setMenuOpen(false);
         try {
@@ -332,7 +333,7 @@
         } finally {
           form.removeAttribute('aria-busy');
           submit.disabled = false;
-          submit.textContent = label;
+          if (!icon) submit.textContent = label;
           if (form === cloneForm) cancelClone.disabled = false;
         }
       });

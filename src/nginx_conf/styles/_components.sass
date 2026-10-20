@@ -219,7 +219,6 @@ select.nc-input
     background: var(--nc-placeholder)
 .nc-select .nc-suggestions
   z-index: 2
-  top: calc(100% - 1px)
   [role="option"]
     display: flex
     gap: 8px
@@ -240,7 +239,7 @@ select.nc-input
 .nc-suggestions
   position: absolute
   z-index: 1
-  top: 100%
+  top: calc(100% - 1px)
   left: 0
   width: 100%
   max-height: 192px
