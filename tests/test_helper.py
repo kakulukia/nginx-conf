@@ -3,6 +3,8 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from nginx_conf import helper as helper_module
 from nginx_conf.helper import handle_helper_request
 from nginx_conf.store import AppDatabase
@@ -391,10 +393,16 @@ def test_missing_git_repo_blocks_before_write(tmp_path: Path) -> None:
     assert config.read_text(encoding="utf-8") == "server { listen 80; }\n"
 
 
-def test_certbot_helper_checks_active_selected_config_and_action_domains(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("paired", [False, True])
+def test_certbot_helper_checks_active_selected_config_and_action_domains(monkeypatch, tmp_path: Path, paired) -> None:
     from nginx_conf.system_actions import certbot_issue_command
 
     project_root, project, config, db = create_repo_project(tmp_path)
+    if paired:
+        config.write_text(
+            "server { listen 80; server_name old.example.com; }\n"
+            "server { listen 443 ssl; server_name old.example.com; }\n"
+        )
     enabled = tmp_path / "enabled"
     enabled.mkdir()
     (enabled / "demo-app").symlink_to(config)
@@ -435,6 +443,19 @@ def test_certbot_helper_checks_active_selected_config_and_action_domains(monkeyp
     )
     assert code == 0 and result["ok"]
     assert calls == [command.argv]
+    if paired:
+        valid_config = config.read_text()
+        for extra in (
+            "server { listen 443 ssl; server_name old.example.com; }",
+            "server { listen 443 ssl; server_name old.example.com other.example.com; }",
+        ):
+            config.write_text(valid_config + extra)
+            code, result = handle_helper_request(
+                "certbot-issue", payload, db_path=db.path, project_root=project_root, enabled_root=enabled
+            )
+            assert code == 1 and "unambiguous" in result["error"]
+            assert calls == [command.argv]
+        config.write_text(valid_config)
     (enabled / "demo-app").unlink()
     code, _ = handle_helper_request(
         "certbot-issue", payload, db_path=db.path, project_root=project_root, enabled_root=enabled

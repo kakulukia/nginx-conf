@@ -1,0 +1,25 @@
+{% if project_rows %}
+<div class="nc-scroll" tabindex="0" role="region" aria-label="Projekte">
+  <table class="nc-table app-project-table" aria-label="Projekte">
+    <thead><tr><th scope="col">Hinweise</th><th scope="col">Projekt</th><th scope="col">Domains</th><th scope="col">Nginx</th></tr></thead>
+    <tbody>
+      {% for row in project_rows %}
+      <tr>
+        <td>
+          {% if row.has_warning %}
+          <a class="nc-icon-link app-project-warning" href="/projects/{{ row.name | urlencode }}" aria-label="Hinweise zu {{ row.name }} öffnen" title="Projekt prüfen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><path d="M12 3 22 21H2Z"/><path d="M12 9v5m0 3v1"/></svg>
+          </a>
+          {% else %}<span class="nc-text">Keine</span>{% endif %}
+        </td>
+        <th scope="row"><a href="/projects/{{ row.name | urlencode }}">{{ row.name }}</a></th>
+        <td>{% for domain in row.domains %}{{ domain }}{% if not loop.last %}<br>{% endif %}{% else %}<span class="nc-text">Keine Domain ausgewählt</span>{% endfor %}</td>
+        <td><span class="nc-status{% if row.active %} nc-status--success{% endif %}">{{ "aktiv" if row.active else "nicht aktiv" }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="nc-empty"><h2 class="nc-heading">Noch keine Projekte</h2><p class="nc-text">Klone ein Repository, um deine erste Nginx-Konfiguration zu verwalten.</p></div>
+{% endif %}

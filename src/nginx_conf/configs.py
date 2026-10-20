@@ -39,6 +39,35 @@ class NginxConfig:
     enabled: bool = False
     enabled_symlinks: tuple[EnabledSymlink, ...] = ()
 
+    @property
+    def domain_groups(self) -> tuple[NginxServerBlock, ...]:
+        return group_server_blocks(self.server_blocks)
+
+
+def group_server_blocks(blocks: tuple[NginxServerBlock, ...]) -> tuple[NginxServerBlock, ...]:
+    groups: dict[frozenset[str], list[NginxServerBlock]] = {}
+    for block in blocks:
+        groups.setdefault(frozenset(block.server_names), []).append(block)
+
+    result: list[NginxServerBlock] = []
+    for names, members in groups.items():
+        # Only fold the standard HTTP/HTTPS pair with exactly the same domains.
+        if names and len(members) == 2 and {block.listen_ports for block in members} == {(80,), (443,)}:
+            https = next(block for block in members if block.listen_ports == (443,))
+            result.append(replace(https, listen_ports=(80, 443)))
+        else:
+            result.extend(members)
+    return tuple(sorted(result, key=lambda block: block.ordinal))
+
+
+def certificate_server_group(blocks: tuple[NginxServerBlock, ...], domains: tuple[str, ...]) -> NginxServerBlock | None:
+    groups = group_server_blocks(blocks)
+    names = set(domains)
+    matching = [group for group in groups if set(group.server_names) == names]
+    if len(matching) != 1 or any(names.intersection(group.server_names) for group in groups if group is not matching[0]):
+        return None
+    return matching[0]
+
 
 @dataclass(frozen=True, slots=True)
 class ProjectInventory:
@@ -380,7 +409,7 @@ def _add_duplicate_conflicts(
 
     for project_name, _project_path, configs, _issues in project_records:
         for config in configs:
-            for block in config.server_blocks:
+            for block in config.domain_groups:
                 block_subject = f"{config.config_path}#server[{block.ordinal}]"
                 for server_name in block.server_names:
                     domains.setdefault(server_name, []).append(block_subject)
@@ -398,14 +427,22 @@ def _add_duplicate_conflicts(
         )
         _append_issue_to_related_projects(issue, project_records, issues_by_project)
 
+    port_conflicts: dict[tuple[str, ...], list[int]] = {}
     for port, locations in ports.items():
-        if len(locations) < 2:
-            continue
+        if len(locations) >= 2:
+            port_conflicts.setdefault(tuple(sorted(locations)), []).append(port)
+
+    for locations, shared_ports in port_conflicts.items():
+        label = ", ".join(str(port) for port in sorted(shared_ports))
         issue = InventoryIssue(
             code="duplicate_listen_port",
-            message=f"Listen-Port kommt in mehreren server-Bloecken vor: {port}",
-            subject=str(port),
-            related=tuple(locations),
+            message=(
+                f"Listen-Port kommt in mehreren server-Bloecken vor: {label}"
+                if len(shared_ports) == 1
+                else f"Listen-Ports kommen in mehreren Konfigurationen vor: {label}"
+            ),
+            subject=label,
+            related=locations,
         )
         _append_issue_to_related_projects(issue, project_records, issues_by_project)
 

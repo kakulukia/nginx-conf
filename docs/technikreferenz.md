@@ -84,6 +84,15 @@ bereits gespeicherte Auswahl verwenden.
   Hellmodus und mobile Gestaltung gehoeren nicht zum Projektumfang.
   Anmeldung, Authenticator-Einrichtung, Projektübersicht, Config-Editor und
   Logs verwenden die gemeinsamen Komponenten des Styleguides.
+- Die Startseite zeigt eine Projekttabelle mit Domains der aktiven Configs
+  beziehungsweise der ausgewählten Config, Nginx-Aktivstatus und einem roten
+  Warndreieck bei Projektbefunden. Projektname und Warndreieck führen nach
+  `/projects/{project_name}`. Configs, Auswahl, Git, SSL, Django und PM2 stehen
+  auf dieser Projektseite. Übergreifende Serverhinweise bleiben auf der
+  Startseite eingeklappt erreichbar. `/configs` zeigt ebenfalls die Übersicht.
+- Vollständige JSON-Objekte und Arrays in Aktionsausgaben werden mit Einrückung
+  und Zeilenumbrüchen angezeigt. Klartext und abgeschnittenes JSON bleiben
+  unverändert; gespeicherte Ergebnisse und API-Antworten ändern sich nicht.
 - Config-Editor: zuerst normales `<textarea>`, spaeter optional CodeMirror
 - Betrieb der Verwaltungs-App: systemd als eigener unprivilegierter Systemuser
 - Betrieb von Nginx: systemd
@@ -262,6 +271,17 @@ Sonderpfade wie alte Home-Verzeichnisse bekommen im MVP keine eigene
 Kompatibilitaetslogik; solche Projekte werden bei Bedarf direkt im Projekt
 vereinfacht.
 
+Die Anwendung behandelt HTTP auf Port 80 und HTTPS auf Port 443 als ein
+zusammengehöriges Paar mit identischen Domainnamen. Die Projektseite zeigt
+dafür eine gemeinsame Domain-Gruppe, Hinweise nur einmal und höchstens eine
+Zertifikatsaktion. Gleiche Domains im HTTP-/HTTPS-Paar sind kein Konflikt.
+Port-Hinweise für dieselben betroffenen Konfigurationen werden zusammengefasst.
+Die Gruppenprüfung wird auch für Certbot in Web-App und privilegiertem Helper
+verwendet. Zusätzliche gleichartige Blöcke und abweichende Alias-Gruppen bleiben
+Konflikte und dürfen nicht zu einer Zertifikatsaktion zusammengeführt werden.
+Gespeicherte Auswahl und automatische Auswahl eines einzigen Kandidaten
+werden ausdrücklich unterschieden. Die Anzeige ändert die Auswahl nicht.
+
 Schreibende Config-Aenderungen folgen diesem Ablauf:
 
 1. erlaubte Config und Pfad validieren
@@ -295,7 +315,7 @@ nicht als WIP committet. Reload ist nur nach fehlerfreiem Test und erfolgreichem
 Commit erlaubt.
 Wenn das Projekt als Django-Projekt erkannt wurde und die Domains der
 geanderten Nginx-Config in statisch lesbaren Django-Settings nicht vollstaendig
-in `ALLOWED_HOSTS` enthalten sind, zeigt die Startseite nur an der betroffenen
+in `ALLOWED_HOSTS` enthalten sind, zeigt die Projektseite nur an der betroffenen
 Domain bzw. `server_name`-Gruppe eine Warnung. Es gibt dafuer keine eigene
 dauerhaft sichtbare Dashboard-Spalte. Nach einer App-gemachten
 Nginx-Domainaenderung blockiert ein fehlender `ALLOWED_HOSTS`-Eintrag
@@ -489,7 +509,7 @@ z.B. `example.com www.example.com`, werden diese Namen gemeinsam mit mehreren
 `*.example.com` sind im MVP nicht erlaubt; die App nutzt kein DNS-01-Verfahren
 und keine Provider-Credentials. Ebenso nicht certbot-faehig sind
 `server_name`-Werte wie `_`, `localhost`, IP-Adressen oder interne
-Einzelnamen. Solche Namen bleiben in der Startseite sichtbar, bekommen aber
+Einzelnamen. Solche Namen bleiben auf der Projektseite sichtbar, bekommen aber
 keine Zertifikat-ausstellen-Aktion. Wenn eine `server_name`-Gruppe nicht
 certbot-faehige Namen enthaelt, startet die App fuer diese Gruppe keinen
 Certbot-Aufruf, statt einzelne Namen still herauszufiltern. HTTPS-Redirect ist
@@ -520,11 +540,16 @@ Schritte, ohne dass ein Terminal-Dialog offen bleibt oder Benutzereingaben
 erwartet werden.
 
 Vor Certbot muss die `server_name`-Gruppe eindeutig zur gespeicherten
-Projekt-Config und zu genau einem Nginx-`server`-Block passen. Wenn ein Name
+Projekt-Config und zu einer Domain-Gruppe passen. Ein HTTP-/HTTPS-Paar mit
+derselben vollständigen Namensmenge zählt als eine Gruppe. Die Reihenfolge der
+Namen ist dafür unerheblich; Teilmengen und sich überschneidende Alias-Gruppen
+werden nicht zusammengelegt. Ein initialer einzelner HTTP-Block bleibt für
+die erste Zertifikatsausstellung unterstützt. Certbot validiert die Domains
+bei HTTP-01 über Port 80 und richtet das Zertifikat für HTTPS ein. Wenn ein Name
 aus dieser Gruppe in mehreren aktiven oder bekannten Nginx-Configs vorkommt,
 ist das kein normaler Certbot-Workflow, sondern ein zu klaerender
-Konfigurationskonflikt. Die App mischt im MVP keine Namen aus mehreren
-`server`-Bloecken zu einem Zertifikat. Direkt vor Certbot fuehrt die App als
+Konfigurationskonflikt. Die App mischt im MVP keine Namen aus unterschiedlichen
+Domain-Gruppen zu einem Zertifikat. Direkt vor Certbot fuehrt die App als
 Teil derselben Hintergrundaktion `nginx -t` aus. Wenn dieser Vorabtest
 fehlschlaegt, wird Certbot nicht gestartet und das Ergebnis im Banner angezeigt.
 Vor Certbot prueft die App ausserdem read-only DNS fuer alle Namen der
@@ -552,7 +577,7 @@ manuell verwaltete SSL-Bloecke gewechselt werden.
 Die App soll keine eigene automatische Erneuerung erzwingen. Certbot bringt je
 nach Installation bereits Cron oder systemd Timer mit. Die App soll diese
 Mechanismen erkennen und per `certbot renew --dry-run` pruefbar machen.
-Die Startseite warnt frueh anhand der Restlaufzeit: gelb bei weniger als
+Die Projektseite warnt frueh anhand der Restlaufzeit: gelb bei weniger als
 30 Tagen, rot bei weniger als 14 Tagen und kritisch bei weniger als 7 Tagen.
 Diese Warnungen sollen Risiko sichtbar machen; sie ersetzen nicht den
 Certbot-Renewal-Mechanismus.

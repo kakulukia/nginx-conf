@@ -1,9 +1,11 @@
 import hashlib
+import html
 import json
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from nginx_conf import logs as logs_module
@@ -12,6 +14,7 @@ from nginx_conf.auth import PASSWORD_HASHER, SESSION_COOKIE_NAME, configure_pass
 from nginx_conf.certbot_renewal import CertbotRenewalMechanism, CertbotRenewalStatus
 from nginx_conf.dns_preflight import DNSPreflightResult, DomainDNSResult
 from nginx_conf.helper import handle_helper_request
+from nginx_conf.pm2_status import PM2StatusInventory
 from nginx_conf.ssl_status import DomainCertificateStatus, ProjectSSLStatus, SSLInventory
 from nginx_conf.store import ActionLockError, AppDatabase
 from nginx_conf.system_actions import (
@@ -173,7 +176,9 @@ def test_home_page(monkeypatch, tmp_path) -> None:
     assert "demo-app" in response.text
     assert "demo.local" in response.text
     assert "aktiv" in response.text
-    assert "Nginx-Auswahl" in response.text
+    assert "Nginx-Auswahl" not in response.text
+    assert 'href="/projects/demo-app"' in response.text
+    assert 'class="nc-table app-project-table"' in response.text
     assert "nginx -t" in response.text
     assert "/api/projects/clone" in response.text
 
@@ -193,6 +198,131 @@ def test_header_actions_stay_locked_while_another_action_runs(monkeypatch, tmp_p
     clone_dialog = response.text.split('id="clone-project"', 1)[1].split("</dialog>", 1)[0]
     assert 'action="/api/projects/clone"' in clone_dialog
     assert " disabled>Klonen</button>" in clone_dialog
+
+
+def test_project_page_keeps_details_out_of_overview_and_scopes_projects(monkeypatch, tmp_path) -> None:
+    project, _enabled, config = configure_temp_project_roots(monkeypatch, tmp_path)
+    config.write_text(
+        "server { listen 80; server_name demo.local www.demo.local; }\n"
+        "server { listen 443 ssl; server_name demo.local www.demo.local; }\n"
+    )
+    (project.parent / "other-project").mkdir()
+    overview = client.get("/")
+    details = client.get("/projects/demo-app")
+
+    assert 'aria-label="Hinweise zu demo-app öffnen"' in overview.text
+    assert 'href="/projects/demo-app"' in overview.text
+    assert 'href="/projects/other-project"' in overview.text
+    assert "Django ALLOWED_HOSTS fehlt" not in overview.text
+    assert "/configs/demo-app/app.nginx" not in overview.text
+    assert details.status_code == 200
+    assert "/configs/demo-app/app.nginx" in details.text
+    assert "Nginx-Auswahl" in details.text
+    assert "Nginx-Block" not in details.text
+    assert details.text.count("Django ALLOWED_HOSTS fehlt") == 1
+    assert details.text.count("Zertifikat ausstellen") == 1
+    assert "/server-blocks/2/certbot/issue" in details.text
+    assert "/server-blocks/1/certbot/issue" not in details.text
+    assert "Domain kommt in mehreren server_name-Gruppen vor" not in details.text
+    assert "server 1:" not in details.text
+    assert "other-project" not in details.text
+    assert 'href="/">Projekte</a>' in details.text
+
+    with config.open("a") as config_file:
+        config_file.write("server { listen 443 ssl; server_name demo.local www.demo.local; }\n")
+    ambiguous = client.get("/projects/demo-app")
+    assert ambiguous.status_code == 200
+    assert "Zertifikat ausstellen" not in ambiguous.text
+    assert "Domain kommt in mehreren server_name-Gruppen vor" in ambiguous.text
+
+
+def test_project_table_uses_active_domains_and_has_no_warning_for_clean_project(monkeypatch, tmp_path) -> None:
+    project, enabled, config = configure_temp_project_roots(monkeypatch, tmp_path)
+    (project / "manage.py").unlink()
+    (project / "start.sh").write_text("#!/bin/sh\n")
+    run_git(project, "init")
+    run_git(project, "add", ".")
+    run_git(project, "-c", "user.name=Test", "-c", "user.email=test@example.org", "commit", "-m", "initial")
+    (enabled / "demo-app").symlink_to(config)
+    monkeypatch.setattr(main, "discover_ssl_inventory", lambda *args, **kwargs: SSLInventory((), ()))
+
+    overview = client.get("/")
+    assert overview.status_code == 200
+    assert 'class="nc-status nc-status--success">aktiv' in overview.text
+    assert 'aria-label="Hinweise zu demo-app öffnen"' not in overview.text
+
+    with monkeypatch.context() as unavailable_pm2:
+        unavailable_pm2.setattr(main, "read_pm2_status", lambda **kwargs: PM2StatusInventory((), "PM2 nicht erreichbar"))
+        assert 'aria-label="Hinweise zu demo-app öffnen"' in client.get("/").text
+        assert "PM2 nicht erreichbar" in client.get("/projects/demo-app").text
+
+    (project / "unused.nginx").write_text("server { listen 81; server_name unused.local; }")
+    AppDatabase(main.DATABASE_PATH).save_project_selection(
+        "demo-app", nginx_config_path=config, pm2_start_script_path=project / "start.sh"
+    )
+    overview = client.get("/")
+    assert "unused.local" not in overview.text
+    assert "demo.local" in overview.text
+    assert 'aria-label="Hinweise zu demo-app öffnen"' in overview.text
+    assert "gespeicherte Auswahl" in client.get("/projects/demo-app").text
+
+    run_git(project, "add", "unused.nginx")
+    run_git(project, "-c", "user.name=Test", "-c", "user.email=test@example.org", "commit", "-m", "alternative")
+    assert 'aria-label="Hinweise zu demo-app öffnen"' not in client.get("/").text
+    (enabled / "demo-app").unlink()
+    (enabled / "demo-app").symlink_to(project / "unused.nginx")
+    overview = client.get("/")
+    assert "unused.local" in overview.text
+    assert 'aria-label="Hinweise zu demo-app öffnen"' in overview.text
+
+
+@pytest.mark.parametrize("path", ["/projects/missing", "/projects/%2E%2E%2Fetc", "/projects/%3Cscript%3E"])
+def test_project_page_rejects_unknown_projects(monkeypatch, tmp_path, path) -> None:
+    configure_test_roots(monkeypatch, tmp_path)
+    assert client.get(path).status_code == 404
+
+
+def test_project_page_requires_login(monkeypatch, tmp_path) -> None:
+    configure_test_roots(monkeypatch, tmp_path)
+    with TestClient(main.app) as browser:
+        response = browser.get("/projects/demo-app", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
+
+
+def test_empty_project_table(monkeypatch, tmp_path) -> None:
+    configure_test_roots(monkeypatch, tmp_path)
+    monkeypatch.setattr(main, "PROJECT_ROOT", tmp_path)
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Noch keine Projekte" in response.text
+    assert 'class="nc-table app-project-table"' not in response.text
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        '{"ok": true, "files": ["<script>alert(1)</script>", "größer"]}',
+        '[{"code": 1}, {"code": 2}]',
+        "syntax ok",
+        '{"cut":',
+        "null",
+    ],
+    ids=["object", "array", "plain", "truncated", "scalar"],
+)
+def test_action_output_is_readable_and_escaped_without_changing_stored_output(monkeypatch, tmp_path, output) -> None:
+    configure_test_roots(monkeypatch, tmp_path)
+    db = AppDatabase(main.DATABASE_PATH)
+    action = db.create_action(action_type="nginx-test", target="nginx")
+    db.finish_action(action, status="succeeded", exit_code=0, stdout_excerpt=output)
+    page = client.get("/")
+    rendered_output = page.text.split('<pre class="nc-code app-action-output">', 1)[1].split("</pre>", 1)[0]
+    assert "<script>" not in rendered_output
+    if output.startswith(('{"ok"', '[{"code"')):
+        assert html.unescape(rendered_output) == json.dumps(json.loads(output), indent=2, ensure_ascii=False)
+    else:
+        assert html.unescape(rendered_output) == output
+    assert db.get_last_unacknowledged_result().stdout_excerpt == output
 
 
 def test_clone_project_api_runs_helper_and_reports_visible_project(monkeypatch, tmp_path) -> None:
@@ -266,13 +396,13 @@ def test_clone_project_api_rejects_non_github_or_existing_target(monkeypatch, tm
     assert "already exists" in existing.json()["detail"]
 
 
-def test_home_page_shows_django_deploy_actions_for_django_project(monkeypatch, tmp_path) -> None:
+def test_project_page_shows_django_deploy_actions_for_django_project(monkeypatch, tmp_path) -> None:
     project, _enabled_root, _config = configure_temp_project_roots(monkeypatch, tmp_path)
     venv = project / ".venv/bin"
     venv.mkdir(parents=True)
     (venv / "python").write_text("#!/bin/sh\n", encoding="utf-8")
 
-    response = client.get("/")
+    response = client.get("/projects/demo-app")
 
     assert response.status_code == 200
     assert "Django Deploy" in response.text
@@ -281,10 +411,10 @@ def test_home_page_shows_django_deploy_actions_for_django_project(monkeypatch, t
     assert "compress nicht verfuegbar" in response.text
 
 
-def test_home_page_hides_django_deploy_actions_for_non_django_project(monkeypatch, tmp_path) -> None:
+def test_project_page_hides_django_deploy_actions_for_non_django_project(monkeypatch, tmp_path) -> None:
     configure_git_project_roots(monkeypatch, tmp_path)
 
-    response = client.get("/")
+    response = client.get("/projects/demo-app")
 
     assert response.status_code == 200
     assert "Django Deploy" not in response.text
@@ -347,10 +477,10 @@ def test_unconfigured_app_has_only_login_and_no_web_setup(monkeypatch, tmp_path)
     assert browser.post("/api/setup", json={}).status_code == 404
 
 
-def test_home_page_shows_missing_django_allowed_hosts_at_domain_group(monkeypatch, tmp_path) -> None:
+def test_project_page_shows_missing_django_allowed_hosts_at_domain_group(monkeypatch, tmp_path) -> None:
     configure_temp_project_roots(monkeypatch, tmp_path)
 
-    response = client.get("/")
+    response = client.get("/projects/demo-app")
 
     assert response.status_code == 200
     assert "Django ALLOWED_HOSTS fehlt" in response.text
@@ -363,8 +493,9 @@ def test_configs_index_shows_demo_config(monkeypatch, tmp_path) -> None:
     response = client.get("/configs")
 
     assert response.status_code == 200
-    assert "+.nginx" in response.text
+    assert 'href="/projects/demo-app"' in response.text
     assert "www.demo.local" in response.text
+    assert "+.nginx" in client.get("/projects/demo-app").text
 
 
 def test_projects_api_returns_structured_inventory(monkeypatch, tmp_path) -> None:
@@ -895,17 +1026,17 @@ def test_static_location_api_rejects_unlisted_static_path(monkeypatch, tmp_path)
     assert "relative project path" in response.json()["detail"]
 
 
-def test_home_page_shows_certbot_issue_action_for_missing_cert(monkeypatch, tmp_path) -> None:
+def test_project_page_shows_certbot_issue_action_for_missing_cert(monkeypatch, tmp_path) -> None:
     configure_test_roots(monkeypatch, tmp_path)
 
-    response = client.get("/")
+    response = client.get("/projects/demo-app")
 
     assert response.status_code == 200
     assert "Zertifikat ausstellen" in response.text
     assert "/server-blocks/1/certbot/issue" in response.text
 
 
-def test_home_page_shows_renewal_check_for_expiring_certificate(monkeypatch, tmp_path) -> None:
+def test_project_page_shows_renewal_check_for_expiring_certificate(monkeypatch, tmp_path) -> None:
     configure_test_roots(monkeypatch, tmp_path)
     expires_at = datetime(2026, 6, 25, 12, 0, tzinfo=UTC)
     ssl_inventory = SSLInventory(
@@ -947,7 +1078,7 @@ def test_home_page_shows_renewal_check_for_expiring_certificate(monkeypatch, tmp
     monkeypatch.setattr(main, "discover_ssl_inventory", lambda projects, letsencrypt_root: ssl_inventory)
     monkeypatch.setattr(main, "inspect_certbot_renewal", lambda: renewal_status)
 
-    response = client.get("/")
+    response = client.get("/projects/demo-app")
 
     assert response.status_code == 200
     assert "Renewal-Pruefung" in response.text
@@ -1008,8 +1139,16 @@ def test_certbot_renewal_api_reports_mechanisms_and_last_dry_run(monkeypatch, tm
     assert payload["last_dry_run"]["status"] == "failed"
 
 
-def test_certbot_issue_api_runs_preflight_certbot_posttest_and_reload(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize("paired", [False, True], ids=["initial-http", "http-https-pair"])
+def test_certbot_issue_api_runs_preflight_certbot_posttest_and_reload(monkeypatch, tmp_path, paired) -> None:
     project, _enabled_root, config = configure_git_project_roots(monkeypatch, tmp_path)
+    if paired:
+        config.write_text(
+            "server { listen 80; server_name old.example.com; }\n"
+            "server { listen 443 ssl; server_name old.example.com; }\n"
+        )
+        run_git(project, "add", "app.nginx")
+        run_git(project, "commit", "-m", "HTTP and HTTPS pair")
     calls = []
 
     def fake_dns(domains, db):
@@ -1035,6 +1174,7 @@ def test_certbot_issue_api_runs_preflight_certbot_posttest_and_reload(monkeypatc
                     "--redirect",
                 )
                 config.write_text(
+                    "server { listen 80; server_name old.example.com; return 301 https://old.example.com$request_uri; }\n"
                     "server { listen 443 ssl; server_name old.example.com; ssl_certificate /etc/letsencrypt/live/old.example.com/fullchain.pem; }\n",
                     encoding="utf-8",
                 )
@@ -1059,7 +1199,8 @@ def test_certbot_issue_api_runs_preflight_certbot_posttest_and_reload(monkeypatc
     monkeypatch.setattr(main, "check_dns_preflight", fake_dns)
     monkeypatch.setattr(main, "get_system_action_service", lambda db: Service())
 
-    response = client.post("/api/projects/demo-app/configs/app.nginx/server-blocks/1/certbot/issue")
+    ordinal = 2 if paired else 1
+    response = client.post(f"/api/projects/demo-app/configs/app.nginx/server-blocks/{ordinal}/certbot/issue")
 
     assert response.status_code == 200
     payload = response.json()

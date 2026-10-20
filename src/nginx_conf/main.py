@@ -26,7 +26,13 @@ from nginx_conf.certbot_renewal import (
     certbot_renewal_status_to_dict,
     inspect_certbot_renewal,
 )
-from nginx_conf.configs import NginxConfig, discover_inventory, find_project_configs, inventory_to_dict
+from nginx_conf.configs import (
+    NginxConfig,
+    certificate_server_group,
+    discover_inventory,
+    find_project_configs,
+    inventory_to_dict,
+)
 from nginx_conf.django_allowed_hosts import (
     AllowedHostsFinding,
     AllowedHostsInventory,
@@ -83,6 +89,17 @@ from nginx_conf.system_actions import (
 )
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+
+def format_command_output(output: str) -> str:
+    try:
+        value = json.loads(output)
+        return json.dumps(value, indent=2, ensure_ascii=False) if isinstance(value, (dict, list)) else output
+    except ValueError, RecursionError:
+        return output
+
+
+templates.env.filters["format_command_output"] = format_command_output
 
 
 @asynccontextmanager
@@ -359,88 +376,104 @@ def logout_api(request: Request) -> Response:
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request) -> Response:
-    inventory = load_inventory()
-    database = get_database()
-    project_choices = build_project_choice_states(inventory.projects, database)
-    choices_by_project = {choice.project_name: choice for choice in project_choices}
-    ssl_inventory = discover_ssl_inventory(inventory.projects, letsencrypt_root=LETSENCRYPT_ROOT)
-    renewal_status = inspect_certbot_renewal()
-    allowed_hosts_inventory = check_django_allowed_hosts(inventory.projects)
-    django_deploy_statuses = inspect_django_deploy(inventory.projects)
-    pm2_status = read_pm2_status(
-        project_root=PROJECT_ROOT,
-        projects=inventory.projects,
-        db=database,
-        runner=get_command_runner(database),
-    )
-    return templates.TemplateResponse(
-        request,
-        "home.html",
-        {
-            "title": "Nginx-Verwaltungstool",
-            "inventory": inventory,
-            "project_choices": choices_by_project,
-            "git_statuses": {
-                project.project_name: inspect_project_git(project, choices_by_project[project.project_name])
-                for project in inventory.projects
-            },
-            "ssl_statuses": {project.project_name: project for project in ssl_inventory.projects},
-            "ssl_renewal_warning_projects": _ssl_renewal_warning_projects(ssl_inventory),
-            "unassigned_ssl_lineages": ssl_inventory.unassigned_lineages,
-            "certbot_renewal_status": renewal_status,
-            "last_certbot_renew_dry_run": database.get_last_action_result_by_type("certbot-renew-dry-run"),
-            "certbot_actions": _certbot_actions_by_config_block(inventory, ssl_inventory),
-            "allowed_hosts_warnings": _allowed_hosts_warnings_by_config_block(allowed_hosts_inventory),
-            "django_deploy_statuses": {
-                status.project_name: status for status in django_deploy_statuses if status.is_django
-            },
-            "pm2_status": pm2_status,
-            "pm2_processes_by_project": _pm2_processes_by_project(pm2_status),
-            "active_action": database.get_active_action(),
-            "last_action_result": database.get_last_unacknowledged_result(),
-        },
-    )
+    return _projects_page(request, title="Nginx-Verwaltungstool")
 
 
 @app.get("/configs", response_class=HTMLResponse)
 def configs_index(request: Request) -> Response:
+    return _projects_page(request, title="Projekte")
+
+
+@app.get("/projects/{project_name}", response_class=HTMLResponse)
+def project_detail(request: Request, project_name: str) -> Response:
+    return _projects_page(request, title=project_name, project_name=project_name)
+
+
+def _projects_page(request: Request, *, title: str, project_name: str | None = None) -> Response:
     inventory = load_inventory()
+    selected_project = None
+    if project_name is not None:
+        selected_project = next(
+            (project for project in inventory.projects if project.project_name == project_name), None
+        )
+        if selected_project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
     database = get_database()
     project_choices = build_project_choice_states(inventory.projects, database)
     choices_by_project = {choice.project_name: choice for choice in project_choices}
     ssl_inventory = discover_ssl_inventory(inventory.projects, letsencrypt_root=LETSENCRYPT_ROOT)
     renewal_status = inspect_certbot_renewal()
     allowed_hosts_inventory = check_django_allowed_hosts(inventory.projects)
-    django_deploy_statuses = inspect_django_deploy(inventory.projects)
+    django_deploy_statuses = {
+        status.project_name: status for status in inspect_django_deploy(inventory.projects) if status.is_django
+    }
     pm2_status = read_pm2_status(
         project_root=PROJECT_ROOT,
         projects=inventory.projects,
         db=database,
         runner=get_command_runner(database),
     )
+    git_statuses = {
+        project.project_name: inspect_project_git(project, choices_by_project[project.project_name])
+        for project in inventory.projects
+    }
+    ssl_statuses = {project.project_name: project for project in ssl_inventory.projects}
+    allowed_hosts_warnings = _allowed_hosts_warnings_by_config_block(allowed_hosts_inventory)
+    processes_by_project = _pm2_processes_by_project(pm2_status)
+    project_rows = []
+    for project in inventory.projects:
+        choice = choices_by_project[project.project_name]
+        active_configs = [config for config in project.configs if config.enabled]
+        display_configs = active_configs or [
+            config for config in project.configs if config.config_path == choice.selected_nginx_config
+        ]
+        domains = sorted(
+            {name for config in display_configs for block in config.server_blocks for name in block.server_names}
+        )
+        git_status = git_statuses[project.project_name]
+        ssl_status = ssl_statuses.get(project.project_name)
+        django_deploy = django_deploy_statuses.get(project.project_name)
+        processes = processes_by_project.get(project.project_name, ())
+        has_warning = bool(
+            project.issues
+            or choice.issues
+            or not any(config.config_path == choice.selected_nginx_config for config in active_configs)
+            or git_status.error
+            or git_status.repo_dirty
+            or any(allowed_hosts_warnings.get(config.config_path) for config in project.configs)
+            or (ssl_status and any(domain.state != "valid" for domain in ssl_status.domains))
+            or pm2_status.error
+            or any(process.warning or process.status != "online" for process in processes)
+            or (django_deploy and any(not action.available for action in django_deploy.actions))
+        )
+        project_rows.append(
+            {
+                "name": project.project_name,
+                "domains": domains,
+                "active": bool(active_configs),
+                "has_warning": has_warning,
+            }
+        )
     return templates.TemplateResponse(
         request,
         "home.html",
         {
-            "title": "Gefundene Nginx-Configs",
+            "title": title,
             "inventory": inventory,
+            "selected_project": selected_project,
+            "project_rows": project_rows,
             "project_choices": choices_by_project,
-            "git_statuses": {
-                project.project_name: inspect_project_git(project, choices_by_project[project.project_name])
-                for project in inventory.projects
-            },
-            "ssl_statuses": {project.project_name: project for project in ssl_inventory.projects},
+            "git_statuses": git_statuses,
+            "ssl_statuses": ssl_statuses,
             "ssl_renewal_warning_projects": _ssl_renewal_warning_projects(ssl_inventory),
             "unassigned_ssl_lineages": ssl_inventory.unassigned_lineages,
             "certbot_renewal_status": renewal_status,
             "last_certbot_renew_dry_run": database.get_last_action_result_by_type("certbot-renew-dry-run"),
             "certbot_actions": _certbot_actions_by_config_block(inventory, ssl_inventory),
-            "allowed_hosts_warnings": _allowed_hosts_warnings_by_config_block(allowed_hosts_inventory),
-            "django_deploy_statuses": {
-                status.project_name: status for status in django_deploy_statuses if status.is_django
-            },
+            "allowed_hosts_warnings": allowed_hosts_warnings,
+            "django_deploy_statuses": django_deploy_statuses,
             "pm2_status": pm2_status,
-            "pm2_processes_by_project": _pm2_processes_by_project(pm2_status),
+            "pm2_processes_by_project": processes_by_project,
             "active_action": database.get_active_action(),
             "last_action_result": database.get_last_unacknowledged_result(),
         },
@@ -1175,9 +1208,10 @@ def _find_server_block_or_404(config: NginxConfig, block_ordinal: int):
 def _validate_certbot_server_block(inventory, project, config: NginxConfig, block) -> None:
     if not block.certbot_eligible:
         raise HTTPException(status_code=400, detail=f"Server block is not certbot-capable: {block.certbot_blockers}")
-    matching_blocks = [candidate for candidate in config.server_blocks if candidate.server_names == block.server_names]
-    if len(matching_blocks) != 1:
-        raise HTTPException(status_code=400, detail="server_name group must match exactly one server block")
+    if certificate_server_group(config.server_blocks, block.server_names) is None:
+        raise HTTPException(
+            status_code=400, detail="server_name group must match one unambiguous HTTP/HTTPS configuration"
+        )
 
     conflicts: list[str] = []
     selected_path = config.config_path.resolve()
@@ -1186,7 +1220,7 @@ def _validate_certbot_server_block(inventory, project, config: NginxConfig, bloc
         for candidate_config in candidate_project.configs:
             if candidate_config.config_path.resolve() == selected_path:
                 continue
-            for candidate_block in candidate_config.server_blocks:
+            for candidate_block in candidate_config.domain_groups:
                 overlapping = selected_domains.intersection(candidate_block.server_names)
                 if overlapping:
                     conflicts.append(f"{candidate_config.config_path}: {', '.join(sorted(overlapping))}")
@@ -1238,7 +1272,9 @@ def _certbot_actions_by_config_block(projects_or_inventory, ssl_inventory) -> di
         project_ssl = ssl_by_project.get(project.project_name)
         for config in project.configs:
             actions[config.config_path] = {
-                block.ordinal: _certbot_action_for_block(block, project_ssl) for block in config.server_blocks
+                block.ordinal: _certbot_action_for_block(block, project_ssl)
+                for block in config.domain_groups
+                if certificate_server_group(config.server_blocks, block.server_names) is not None
             }
     return actions
 

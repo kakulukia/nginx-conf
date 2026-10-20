@@ -1,0 +1,230 @@
+<section class="app-section">
+  <h2 class="nc-heading">Konfigurationen</h2>
+  {% set choice = project_choices.get(project.project_name) if project_choices is defined else none %}
+  {% if project.configs %}
+    <ul class="app-config-list">
+      {% for config in project.configs %}
+        <li class="app-config">
+          <div class="app-config__header">
+          <a href="/configs/{{ config.project_name }}/{{ config.config_path.name }}">
+            {{ config.config_path.name }}
+          </a>
+          {% if config.enabled %}
+            <span class="nc-status nc-status--success">aktiv</span>
+          {% else %}
+            <span class="nc-status">nicht aktiv</span>
+          {% endif %}
+          <form
+            action="/api/projects/{{ config.project_name }}/configs/{{ config.config_path.name }}/{% if config.enabled %}deactivate{% else %}activate{% endif %}"
+            method="post"
+          >
+            <button class="nc-button{% if config.enabled %} nc-button--danger{% endif %}" type="submit"{% if active_action %} disabled{% endif %}>
+              {% if config.enabled %}Deaktivieren{% else %}Aktivieren{% endif %}
+            </button>
+          </form>
+          </div>
+          {% for block in config.domain_groups %}
+            <div class="nc-text nc-text--small app-meta">
+              Domains:
+              {% if block.server_names %}
+                {{ block.server_names | join(", ") }}
+              {% else %}
+                ohne server_name
+              {% endif %}
+            </div>
+            {% set config_allowed_hosts = allowed_hosts_warnings.get(config.config_path) if allowed_hosts_warnings is defined else none %}
+            {% set allowed_hosts_warning = config_allowed_hosts.get(block.ordinal) if config_allowed_hosts else none %}
+            {% if allowed_hosts_warning %}
+              <div class="nc-text--small app-meta nc-status--warning">
+                Django ALLOWED_HOSTS fehlt:
+                {{ allowed_hosts_warning.missing_domains | join(", ") }}
+                ({{ allowed_hosts_warning.settings_path }})
+              </div>
+            {% endif %}
+            {% set config_certbot_actions = certbot_actions.get(config.config_path) if certbot_actions is defined else none %}
+            {% set certbot_action = config_certbot_actions.get(block.ordinal) if config_certbot_actions else none %}
+            {% if certbot_action and certbot_action.available %}
+              <form
+                action="/api/projects/{{ config.project_name }}/configs/{{ config.config_path.name }}/server-blocks/{{ block.ordinal }}/certbot/issue"
+                method="post"
+              >
+                <button class="nc-button" type="submit"{% if active_action %} disabled{% endif %}>
+                  Zertifikat ausstellen
+                </button>
+              </form>
+            {% elif certbot_action and certbot_action.blockers and "certificate_present" not in certbot_action.blockers %}
+              <div class="nc-text--small app-meta nc-status--warning">
+                Certbot nicht verfuegbar: {{ certbot_action.blockers | join(", ") }}
+              </div>
+            {% endif %}
+          {% endfor %}
+          {% for link in config.enabled_symlinks %}
+            <div class="nc-text nc-text--small app-meta">{{ link.link_path }} -> {{ link.raw_target }}</div>
+          {% endfor %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="nc-status--warning">Keine Nginx-Konfiguration gefunden.</p>
+  {% endif %}
+  {% if choice %}
+    <p class="nc-text nc-text--small app-meta">
+      Nginx-Auswahl:
+      {% if choice.selected_nginx_config %}
+        {{ choice.selected_nginx_config }}
+        {% if choice.nginx_selection_source == "auto" %}(automatisch, einziger Kandidat){% else %}(gespeicherte Auswahl){% endif %}
+      {% else %}
+        <span class="nc-status--warning">Auswahl erforderlich</span>
+      {% endif %}
+    </p>
+    <p class="nc-text nc-text--small app-meta">
+      PM2-Startscript:
+      {% if choice.selected_pm2_start_script %}
+        {{ choice.selected_pm2_start_script }}
+        {% if choice.pm2_selection_source == "auto" %}(automatisch, einziger Kandidat){% else %}(gespeicherte Auswahl){% endif %}
+      {% else %}
+        <span class="nc-status--warning">nicht konfiguriert</span>
+      {% endif %}
+    </p>
+    {% if choice.selected_pm2_start_script %}
+      <form action="/api/projects/{{ project.project_name }}/pm2/create" method="post">
+        <button class="nc-button" type="submit"{% if active_action %} disabled{% endif %}>PM2 anlegen</button>
+      </form>
+    {% endif %}
+    {% if choice.issues %}
+      <ul class="nc-content-list">
+        {% for issue in choice.issues %}
+          <li class="nc-status--warning">{{ issue.message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endif %}
+  {% set django_deploy = django_deploy_statuses.get(project.project_name) if django_deploy_statuses is defined else none %}
+  {% if django_deploy %}
+    <div class="nc-text nc-text--small app-meta">Django Deploy</div>
+    <div class="app-actions">
+      {% for action in django_deploy.actions %}
+        <form action="/api/projects/{{ project.project_name }}/django/{{ action.operation }}" method="post">
+          <button class="nc-button" type="submit"{% if active_action or not action.available %} disabled{% endif %}>
+            {{ action.operation }}
+          </button>
+        </form>
+      {% endfor %}
+    </div>
+    {% for action in django_deploy.actions %}
+      {% if not action.available %}
+        <div class="nc-text--small app-meta nc-status--warning">{{ action.operation }} nicht verfuegbar: {{ action.blockers | join(", ") }}</div>
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+  {% if git_statuses is defined and git_statuses.get(project.project_name) %}
+    {% set git_status = git_statuses.get(project.project_name) %}
+    <p class="nc-text nc-text--small app-meta">
+      Git:
+      {% if git_status.error %}
+      <span class="nc-status--error">{{ git_status.error }}</span>
+      {% elif git_status.commit_required %}
+        Commit erforderlich fuer {{ git_status.selected_config }}
+      {% elif git_status.repo_dirty %}
+        Repo enthaelt fremde Aenderungen
+      {% else %}
+        sauber
+      {% endif %}
+    </p>
+    {% if git_status.foreign_changes %}
+      <p class="nc-text--small app-meta nc-status--warning">Fremde Aenderungen: {{ git_status.foreign_changes | join(", ") }}</p>
+    {% endif %}
+  {% endif %}
+  {% if ssl_statuses is defined and ssl_statuses.get(project.project_name) %}
+    {% set ssl_status = ssl_statuses.get(project.project_name) %}
+    {% if ssl_status.domains %}
+      <ul class="nc-content-list">
+        {% for domain_status in ssl_status.domains %}
+          <li>
+            SSL {{ domain_status.domain }}:
+            {% if domain_status.state in ["missing", "expired", "critical", "red", "yellow", "error"] %}
+              <span class="nc-status--warning">{{ domain_status.state }}</span>
+            {% else %}
+              {{ domain_status.state }}
+            {% endif %}
+            <span class="nc-text nc-text--small app-meta">{{ domain_status.relative_expiry }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+      {% if ssl_renewal_warning_projects is defined and project.project_name in ssl_renewal_warning_projects %}
+        <div class="nc-text--small app-meta nc-status--warning">
+          Renewal-Pruefung:
+          Auto-Erneuerung {{ certbot_renewal_status.summary if certbot_renewal_status else "nicht geprueft" }}.
+          {% if last_certbot_renew_dry_run %}
+            Letzter Dry-Run: {{ last_certbot_renew_dry_run.status }}
+            {% if last_certbot_renew_dry_run.finished_at %}({{ last_certbot_renew_dry_run.finished_at }}){% endif %}
+          {% else %}
+            Noch kein Dry-Run gespeichert.
+          {% endif %}
+        </div>
+        {% if certbot_renewal_status and certbot_renewal_status.mechanisms %}
+          <ul class="nc-text nc-text--small app-meta">
+            {% for mechanism in certbot_renewal_status.mechanisms %}
+              <li>{{ mechanism.kind }} {{ mechanism.name }}: {{ mechanism.status }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        <form action="/api/certbot/renew/dry-run" method="post">
+          <button class="nc-button" type="submit"{% if active_action %} disabled{% endif %}>certbot renew --dry-run</button>
+        </form>
+      {% endif %}
+    {% endif %}
+  {% endif %}
+  {% if pm2_status.error %}
+    <p class="nc-status--error">{{ pm2_status.error }}</p>
+  {% endif %}
+  {% if pm2_processes_by_project is defined and pm2_processes_by_project.get(project.project_name) %}
+    <ul class="nc-content-list">
+      {% for process in pm2_processes_by_project.get(project.project_name) %}
+        <li>
+          PM2 {{ process.name }}:
+          {% if process.status %}
+            {{ process.status }}
+          {% else %}
+            Status unbekannt
+          {% endif %}
+          {% if process.port %}
+            <span class="nc-text nc-text--small app-meta">Port {{ process.port }}</span>
+          {% endif %}
+          {% if process.restart_count is not none %}
+            <span class="nc-text nc-text--small app-meta">Restarts {{ process.restart_count }}</span>
+          {% endif %}
+          {% if process.managed %}
+            <span class="nc-status nc-status--success">verwaltet</span>
+            <div class="app-actions">
+              <form action="/api/projects/{{ project.project_name }}/pm2/{{ process.name }}/restart" method="post">
+                <button class="nc-button" type="submit"{% if active_action %} disabled{% endif %}>Restart</button>
+              </form>
+              <form action="/api/projects/{{ project.project_name }}/pm2/{{ process.name }}/stop" method="post">
+                <button class="nc-button nc-button--danger" type="submit"{% if active_action %} disabled{% endif %}>Stop</button>
+              </form>
+              <form action="/api/projects/{{ project.project_name }}/pm2/{{ process.name }}/start" method="post">
+                <button class="nc-button" type="submit"{% if active_action %} disabled{% endif %}>Start</button>
+              </form>
+              <form action="/api/projects/{{ project.project_name }}/pm2/{{ process.name }}/delete" method="post">
+                <button class="nc-button nc-button--danger" type="submit"{% if active_action %} disabled{% endif %}>Delete</button>
+              </form>
+            </div>
+          {% elif process.warning == "unmanaged_pm2_process" %}
+            <span class="nc-status--warning">unverwaltet: manuell stoppen und ueber die App neu anlegen</span>
+          {% endif %}
+          {% if process.cwd %}
+            <div class="nc-text nc-text--small app-meta">cwd {{ process.cwd }}</div>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  {% if project.issues %}
+    <ul class="nc-content-list">
+      {% for issue in project.issues %}
+        <li class="nc-status--warning">{{ issue.message }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</section>

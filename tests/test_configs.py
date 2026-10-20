@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from nginx_conf.configs import discover_inventory, find_project_configs, parse_server_blocks
+import pytest
+
+from nginx_conf.configs import certificate_server_group, discover_inventory, find_project_configs, parse_server_blocks
 
 ROOT = Path(__file__).parent
 ENABLED_ROOT = ROOT / "etc/nginx/sites-enabled"
@@ -177,3 +179,62 @@ def test_discover_inventory_reports_duplicate_domains_and_ports(tmp_path: Path) 
     assert "duplicate_listen_port" in issue_codes(inventory.projects[0].issues)
     assert "duplicate_domain" in issue_codes(inventory.projects[1].issues)
     assert "duplicate_listen_port" in issue_codes(inventory.projects[1].issues)
+
+
+def test_http_https_pair_is_one_domain_group_without_duplicate_conflicts(tmp_path: Path) -> None:
+    project = tmp_path / "www/demo-app"
+    project.mkdir(parents=True)
+    config = project / "app.nginx"
+    config.write_text(
+        "server { listen 80; listen [::]:80; server_name demo.example.com www.demo.example.com; }\n"
+        "server { listen 443 ssl; listen [::]:443 ssl; server_name www.demo.example.com demo.example.com; }\n"
+    )
+    inventory = discover_inventory(project.parent, tmp_path / "enabled")
+    discovered = inventory.projects[0].configs[0]
+    assert len(discovered.server_blocks) == 2
+    assert len(discovered.domain_groups) == 1
+    assert discovered.domain_groups[0].ordinal == 2
+    assert discovered.domain_groups[0].listen_ports == (80, 443)
+    assert "duplicate_domain" not in issue_codes(inventory.projects[0].issues)
+    assert "duplicate_listen_port" not in issue_codes(inventory.projects[0].issues)
+    assert certificate_server_group(discovered.server_blocks, ("demo.example.com", "www.demo.example.com")) is not None
+
+
+def test_http_https_port_conflicts_with_same_configs_are_summarized(tmp_path: Path) -> None:
+    root = tmp_path / "www"
+    for name in ("first", "second"):
+        project = root / name
+        project.mkdir(parents=True)
+        (project / "app.nginx").write_text(
+            f"server {{ listen 80; server_name {name}.example.com; }}\n"
+            f"server {{ listen 443 ssl; server_name {name}.example.com; }}\n"
+        )
+    inventory = discover_inventory(root, tmp_path / "enabled")
+    for project in inventory.projects:
+        port_issues = [issue for issue in project.issues if issue.code == "duplicate_listen_port"]
+        assert len(port_issues) == 1
+        assert port_issues[0].subject == "80, 443"
+        assert "duplicate_domain" not in issue_codes(project.issues)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "server { listen 443 ssl; server_name demo.example.com; }",
+        "server { listen 443 ssl; server_name demo.example.com www.demo.example.com; }",
+    ],
+    ids=["duplicate-https", "different-aliases"],
+)
+def test_domain_group_preserves_real_config_conflicts(tmp_path: Path, extra: str) -> None:
+    project = tmp_path / "www/demo-app"
+    project.mkdir(parents=True)
+    config = project / "app.nginx"
+    config.write_text(
+        "server { listen 80; server_name demo.example.com; }\n"
+        "server { listen 443 ssl; server_name demo.example.com; }\n" + extra
+    )
+    inventory = discover_inventory(project.parent, tmp_path / "enabled")
+    discovered = inventory.projects[0].configs[0]
+    assert "duplicate_domain" in issue_codes(inventory.projects[0].issues)
+    assert "duplicate_listen_port" in issue_codes(inventory.projects[0].issues)
+    assert certificate_server_group(discovered.server_blocks, ("demo.example.com",)) is None

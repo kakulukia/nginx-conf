@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from nginx_conf.configs import parse_server_blocks
+from nginx_conf.configs import certificate_server_group, parse_server_blocks
 from nginx_conf.github_clone import GitHubClonePlan, GitHubCloneValidationError, plan_github_clone
 from nginx_conf.store import AppDatabase, default_database_path
 from nginx_conf.system_actions import certbot_issue_command
@@ -289,11 +289,9 @@ def _issue_certificate(request: ValidatedRequest, context: HelperContext) -> tup
     action = context.db.get_action(request.action_id)
     if action.action_type != "certbot-issue" or action.parameters.get("domains") != domains:
         raise HelperRequestError("Certificate domains do not match action_id")
-    matching_blocks = [
-        block for block in parse_server_blocks(request.expected_file) if block.server_names == tuple(domains)
-    ]
-    if len(matching_blocks) != 1:
-        raise HelperRequestError("Certificate domains must match exactly one selected server block")
+    group = certificate_server_group(parse_server_blocks(request.expected_file), tuple(domains))
+    if group is None:
+        raise HelperRequestError("Certificate domains must match one unambiguous HTTP/HTTPS configuration")
     enabled = _validate_enabled_root(context.enabled_root)
     if not any(link.is_symlink() and link.resolve() == request.expected_file for link in enabled.iterdir()):
         raise HelperRequestError("Certificate config must be active")
